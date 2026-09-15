@@ -668,6 +668,44 @@ session, _ := c.CreateSession(ctx, client.SessionRequest{
 
 Runnable demo: [`examples/file-change-collectors/`](examples/file-change-collectors/).
 
+### Explicitly registering system artifacts
+
+In addition to automatic collectors, you can append System Artifact events explicitly.
+This is useful when you want to register files that were changed outside Tier 1/2/3 detection.
+
+```go
+session, _ := c.CreateSession(ctx, client.SessionRequest{
+    Agent:   "codex",
+    WorkDir: dir,
+})
+
+// create/update decision is made by the server (upsert semantics).
+created, _ := c.SystemArtifacts().Put(ctx, "reports/output.txt", client.SystemArtifactWriteRequest{
+    SessionID: session.ID,
+    // Optional: if omitted, server resolves work_dir + key.
+    ActualPath: filepath.Join(dir, "reports", "output.txt"),
+})
+fmt.Println(created.Status, created.Operation) // created create
+
+updated, _ := c.SystemArtifacts().Put(ctx, "reports/output.txt", client.SystemArtifactWriteRequest{
+    SessionID: session.ID,
+})
+fmt.Println(updated.Status, updated.Operation) // updated update
+
+deleted, _ := c.SystemArtifacts().Delete(ctx, "reports/output.txt", client.SystemArtifactWriteRequest{
+    SessionID: session.ID,
+})
+fmt.Println(deleted.Status, deleted.Operation) // deleted delete
+
+// Low-level append API with explicit operation:
+_, _ = c.SystemArtifacts().AppendEvent(ctx, client.SystemArtifactAppendRequest{
+    Key:       "reports/manual.txt",
+    Operation: "create",
+    SessionID: session.ID,
+    ActualPath: filepath.Join(dir, "reports", "manual.txt"),
+})
+```
+
 ### Listing system artifacts (files written by agents)
 
 ```go

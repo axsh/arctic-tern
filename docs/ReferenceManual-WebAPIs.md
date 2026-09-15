@@ -573,3 +573,117 @@ Streams detailed system logs and progress states generated during session execut
 
   data: [DONE]
   ```
+
+---
+
+### 12. Explicit System Artifact Writes
+
+System Artifacts can be registered explicitly through write APIs in addition to automatic collectors (`structured_tool`, `shell_parser`, `workdir_reconcile`). These APIs append metadata events (`key + operation`) and do not store unified diffs.
+
+#### 12.1 Upsert one key
+
+- **Method**: `PUT`
+- **Path**: `/api/v1/artifacts/system/:key`
+- **Request Body (JSON)**:
+  - `session_id` (string, Required)
+  - `turn_id` (string, Optional)
+  - `correlation_id` (string, Optional)
+  - `actual_path` (string, Optional)
+  - `tool_name` (string, Optional; default `api:system_manual`)
+  - `occurred_at` (string, Optional; RFC3339)
+- **Operation decision**:
+  - If key has no history (or latest op is `delete`): append `create`
+  - Otherwise: append `update`
+- **Path resolution**:
+  - When `actual_path` is omitted, Tern resolves `{session.work_dir}/{key}`.
+  - For `create`/`update`, the resolved path must exist on disk after resolution.
+- **Response**:
+  - `201 Created` for `create`
+  - `200 OK` for `update`
+  ```json
+  {
+    "source": "system",
+    "key": "reports/output.txt",
+    "operation": "create",
+    "status": "created",
+    "session_id": "sess-123",
+    "turn_id": "turn-1",
+    "correlation_id": "corr-1",
+    "tool_name": "api:system_manual",
+    "occurred_at": "2026-09-16T07:00:00Z"
+  }
+  ```
+
+#### 12.2 Delete one key (logical tombstone)
+
+- **Method**: `DELETE`
+- **Path**: `/api/v1/artifacts/system/:key`
+- **Request Body (JSON)**:
+  - `session_id` (string, Required)
+  - `turn_id` (string, Optional)
+  - `correlation_id` (string, Optional)
+  - `actual_path` (string, Optional)
+  - `tool_name` (string, Optional; default `api:system_manual`)
+  - `occurred_at` (string, Optional; RFC3339)
+- **Behavior**:
+  - Appends a `delete` event (tombstone).
+  - Returns `404` when the key does not exist or is already deleted.
+  - Does not require filesystem existence checks.
+- **Response**: `200 OK`
+  ```json
+  {
+    "source": "system",
+    "key": "reports/output.txt",
+    "operation": "delete",
+    "status": "deleted",
+    "session_id": "sess-123",
+    "turn_id": "turn-1",
+    "correlation_id": "corr-1",
+    "tool_name": "api:system_manual",
+    "occurred_at": "2026-09-16T07:00:10Z"
+  }
+  ```
+
+#### 12.3 Append low-level event
+
+- **Method**: `POST`
+- **Path**: `/api/v1/artifacts/system/events`
+- **Request Body (JSON)**:
+  - `key` (string, Required)
+  - `operation` (string, Required: `create` | `update` | `delete`)
+  - `session_id` (string, Required)
+  - `turn_id` (string, Optional)
+  - `correlation_id` (string, Optional)
+  - `actual_path` (string, Optional; required in practice for `create`/`update` unless session work_dir resolution is available)
+  - `tool_name` (string, Optional; default `api:system_manual`)
+  - `occurred_at` (string, Optional; RFC3339)
+- **Behavior**:
+  - Appends exactly one event with the supplied `operation`.
+  - For `create`/`update`, the resolved path must exist.
+  - For `delete`, path existence is not required.
+- **Response**: `201 Created`
+
+#### 12.4 Validation and Errors
+
+- `400 Bad Request`:
+  - missing required fields (`session_id`, `key`, `operation`)
+  - invalid key (absolute path or contains `..`)
+  - invalid `occurred_at` format (must be RFC3339)
+  - `create`/`update` with non-existing resolved `actual_path`
+- `404 Not Found`:
+  - delete target key does not exist (or already deleted)
+- `405 Method Not Allowed`:
+  - unsupported method for the endpoint
+- `500 Internal Server Error`:
+  - store persistence failure
+
+#### 12.5 Read API compatibility
+
+Explicitly written events are immediately visible in existing read APIs:
+
+- `GET /api/v1/artifacts/system`
+- `GET /api/v1/artifacts/system/:key`
+- `GET /api/v1/artifacts/system/:key/content`
+- `POST /api/v1/artifacts/system/archive`
+
+Semantics remain append-only. `include_deleted=false` hides keys whose latest operation is `delete`, while `include_deleted=true` shows full history.
