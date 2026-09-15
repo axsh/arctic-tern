@@ -417,6 +417,214 @@ func TestSystemAPI_Archive_GlobMoreThan100(t *testing.T) {
 	assert.Len(t, zr.File, 120)
 }
 
+func TestSystemAPI_Put_Create(t *testing.T) {
+	s := newSystemTestStore(t)
+	seedSession(t, s, "s1", "cursor")
+
+	dir := t.TempDir()
+	actual := filepath.Join(dir, "result.txt")
+	require.NoError(t, os.WriteFile(actual, []byte("ok"), 0o644))
+
+	body, _ := json.Marshal(map[string]any{
+		"session_id":  "s1",
+		"actual_path": actual,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/artifacts/system/reports/result.txt", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newSystemHandler(s).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "reports/result.txt", resp["key"])
+	assert.Equal(t, "create", resp["operation"])
+	assert.Equal(t, "created", resp["status"])
+
+	events, err := s.GetSystemArtifactByKey(context.Background(), "reports/result.txt")
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, store.OperationCreate, events[0].Operation)
+	assert.Equal(t, "api:system_manual", events[0].ToolName)
+}
+
+func TestSystemAPI_Put_Update(t *testing.T) {
+	s := newSystemTestStore(t)
+	seedSession(t, s, "s1", "cursor")
+
+	dir := t.TempDir()
+	actual := filepath.Join(dir, "profile.txt")
+	require.NoError(t, os.WriteFile(actual, []byte("v1"), 0o644))
+	seedEvent(t, s, "s1", "profiles/profile.txt", store.OperationCreate, actual)
+
+	body, _ := json.Marshal(map[string]any{
+		"session_id":  "s1",
+		"actual_path": actual,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/artifacts/system/profiles/profile.txt", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newSystemHandler(s).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "update", resp["operation"])
+	assert.Equal(t, "updated", resp["status"])
+
+	events, err := s.GetSystemArtifactByKey(context.Background(), "profiles/profile.txt")
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, store.OperationUpdate, events[1].Operation)
+}
+
+func TestSystemAPI_Delete_Tombstone(t *testing.T) {
+	s := newSystemTestStore(t)
+	seedSession(t, s, "s1", "cursor")
+	seedEvent(t, s, "s1", "cleanup/old.txt", store.OperationCreate, "/proj/cleanup/old.txt")
+
+	body, _ := json.Marshal(map[string]any{
+		"session_id": "s1",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/artifacts/system/cleanup/old.txt", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newSystemHandler(s).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "cleanup/old.txt", resp["key"])
+	assert.Equal(t, "delete", resp["operation"])
+	assert.Equal(t, "deleted", resp["status"])
+
+	events, err := s.GetSystemArtifactByKey(context.Background(), "cleanup/old.txt")
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, store.OperationDelete, events[1].Operation)
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/artifacts/system?session_id=s1", nil)
+	newSystemHandler(s).ServeHTTP(listRec, listReq)
+	require.Equal(t, http.StatusOK, listRec.Code)
+	var listed map[string]any
+	require.NoError(t, json.NewDecoder(listRec.Body).Decode(&listed))
+	assert.Equal(t, float64(0), listed["total_count"])
+}
+
+func TestSystemAPI_Delete_NotFound(t *testing.T) {
+	s := newSystemTestStore(t)
+	seedSession(t, s, "s1", "cursor")
+
+	body, _ := json.Marshal(map[string]any{
+		"session_id": "s1",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/artifacts/system/missing/file.txt", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newSystemHandler(s).ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestSystemAPI_PostEvents_AppendWithOperation(t *testing.T) {
+	s := newSystemTestStore(t)
+	seedSession(t, s, "s1", "cursor")
+
+	dir := t.TempDir()
+	actual := filepath.Join(dir, "note.txt")
+	require.NoError(t, os.WriteFile(actual, []byte("hello"), 0o644))
+
+	body, _ := json.Marshal(map[string]any{
+		"session_id":  "s1",
+		"key":         "events/note.txt",
+		"operation":   "create",
+		"actual_path": actual,
+		"tool_name":   "api:test",
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/system/events", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	newSystemHandler(s).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	events, err := s.GetSystemArtifactByKey(context.Background(), "events/note.txt")
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, store.OperationCreate, events[0].Operation)
+	assert.Equal(t, "api:test", events[0].ToolName)
+}
+
+func TestSystemAPI_Write_BadRequestCases(t *testing.T) {
+	s := newSystemTestStore(t)
+	seedSession(t, s, "s1", "cursor")
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   map[string]any
+	}{
+		{
+			name:   "put missing session",
+			method: http.MethodPut,
+			path:   "/api/v1/artifacts/system/a.txt",
+			body: map[string]any{
+				"actual_path": "/tmp/a.txt",
+			},
+		},
+		{
+			name:   "put missing actual path without resolver",
+			method: http.MethodPut,
+			path:   "/api/v1/artifacts/system/a.txt",
+			body: map[string]any{
+				"session_id": "s1",
+			},
+		},
+		{
+			name:   "post events invalid operation",
+			method: http.MethodPost,
+			path:   "/api/v1/artifacts/system/events",
+			body: map[string]any{
+				"session_id": "s1",
+				"key":        "x.txt",
+				"operation":  "rename",
+			},
+		},
+		{
+			name:   "post events invalid key",
+			method: http.MethodPost,
+			path:   "/api/v1/artifacts/system/events",
+			body: map[string]any{
+				"session_id": "s1",
+				"key":        "../x.txt",
+				"operation":  "delete",
+			},
+		},
+		{
+			name:   "post events invalid occurred_at",
+			method: http.MethodPost,
+			path:   "/api/v1/artifacts/system/events",
+			body: map[string]any{
+				"session_id":  "s1",
+				"key":         "x.txt",
+				"operation":   "delete",
+				"occurred_at": "invalid-time",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(tc.body)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader(raw))
+			req.Header.Set("Content-Type", "application/json")
+			newSystemHandler(s).ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+		})
+	}
+}
+
 func padAPI(i int) string {
 	return fmt.Sprintf("%03d", i)
 }

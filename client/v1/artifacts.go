@@ -53,6 +53,41 @@ type SystemArtifactFilter struct {
 	Order          string
 }
 
+// SystemArtifactWriteRequest is the request body for explicit System Artifact writes.
+type SystemArtifactWriteRequest struct {
+	SessionID     string `json:"session_id"`
+	TurnID        string `json:"turn_id,omitempty"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+	ActualPath    string `json:"actual_path,omitempty"`
+	ToolName      string `json:"tool_name,omitempty"`
+	OccurredAt    string `json:"occurred_at,omitempty"`
+}
+
+// SystemArtifactAppendRequest appends a low-level event with explicit operation.
+type SystemArtifactAppendRequest struct {
+	Key           string `json:"key"`
+	Operation     string `json:"operation"`
+	SessionID     string `json:"session_id"`
+	TurnID        string `json:"turn_id,omitempty"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+	ActualPath    string `json:"actual_path,omitempty"`
+	ToolName      string `json:"tool_name,omitempty"`
+	OccurredAt    string `json:"occurred_at,omitempty"`
+}
+
+// SystemArtifactWriteResponse is the response body for explicit System Artifact writes.
+type SystemArtifactWriteResponse struct {
+	Source        string    `json:"source"`
+	Key           string    `json:"key"`
+	Operation     string    `json:"operation"`
+	Status        string    `json:"status"`
+	SessionID     string    `json:"session_id"`
+	TurnID        string    `json:"turn_id"`
+	CorrelationID string    `json:"correlation_id"`
+	ToolName      string    `json:"tool_name"`
+	OccurredAt    time.Time `json:"occurred_at"`
+}
+
 // UserArtifactItem represents a user artifact in an API response.
 type UserArtifactItem struct {
 	Source    string    `json:"source"`
@@ -217,6 +252,101 @@ func (sc *SystemArtifactClient) ListAll(ctx context.Context, f SystemArtifactFil
 		pageNum++
 	}
 	return all, nil
+}
+
+// Put appends a create/update System Artifact event for key.
+func (sc *SystemArtifactClient) Put(ctx context.Context, key string, reqBody SystemArtifactWriteRequest) (*SystemArtifactWriteResponse, error) {
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut,
+		sc.c.baseURL+"/api/v1/artifacts/system/"+key, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := sc.c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("put system artifact %q: HTTP %d", key, resp.StatusCode)
+	}
+
+	var out SystemArtifactWriteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Delete appends a delete (tombstone) System Artifact event for key.
+func (sc *SystemArtifactClient) Delete(ctx context.Context, key string, reqBody SystemArtifactWriteRequest) (*SystemArtifactWriteResponse, error) {
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		sc.c.baseURL+"/api/v1/artifacts/system/"+key, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := sc.c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return nil, fmt.Errorf("delete system artifact %q: HTTP %d", key, resp.StatusCode)
+	}
+	if resp.StatusCode == http.StatusNoContent {
+		return &SystemArtifactWriteResponse{
+			Source:    "system",
+			Key:       key,
+			Operation: "delete",
+			Status:    "deleted",
+		}, nil
+	}
+
+	var out SystemArtifactWriteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// AppendEvent appends a low-level System Artifact event with explicit operation.
+func (sc *SystemArtifactClient) AppendEvent(ctx context.Context, reqBody SystemArtifactAppendRequest) (*SystemArtifactWriteResponse, error) {
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		sc.c.baseURL+"/api/v1/artifacts/system/events", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := sc.c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("append system artifact event: HTTP %d", resp.StatusCode)
+	}
+
+	var out SystemArtifactWriteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // Download streams the content of the system artifact at key.

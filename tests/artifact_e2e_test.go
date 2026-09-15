@@ -15,8 +15,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -224,6 +224,145 @@ func TestE2E_SystemArtifact_FilterBySession(t *testing.T) {
 	page, err := c.SystemArtifacts().List(ctx, v1.SystemArtifactFilter{SessionIDs: []string{"nonexistent"}})
 	require.NoError(t, err)
 	assert.Equal(t, 0, page.TotalCount)
+}
+
+func TestE2E_SystemArtifact_ExplicitCRUD(t *testing.T) {
+	baseURL, cleanup := startArtifactE2EServer(t)
+	defer cleanup()
+
+	c := v1.New(baseURL)
+	ctx := context.Background()
+	workDir := t.TempDir()
+
+	session, err := c.CreateSession(ctx, v1.SessionRequest{
+		Agent:   "claudecode",
+		WorkDir: workDir,
+	})
+	require.NoError(t, err)
+
+	key := "reports/explicit.txt"
+	absPath := filepath.Join(workDir, "reports", "explicit.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(absPath), 0o755))
+	require.NoError(t, os.WriteFile(absPath, []byte("v1"), 0o644))
+
+	put1, err := c.SystemArtifacts().Put(ctx, key, v1.SystemArtifactWriteRequest{
+		SessionID: session.ID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "created", put1.Status)
+	assert.Equal(t, "create", put1.Operation)
+
+	require.NoError(t, os.WriteFile(absPath, []byte("v2"), 0o644))
+	put2, err := c.SystemArtifacts().Put(ctx, key, v1.SystemArtifactWriteRequest{
+		SessionID: session.ID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "updated", put2.Status)
+	assert.Equal(t, "update", put2.Operation)
+
+	del, err := c.SystemArtifacts().Delete(ctx, key, v1.SystemArtifactWriteRequest{
+		SessionID: session.ID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "deleted", del.Status)
+	assert.Equal(t, "delete", del.Operation)
+
+	alive, err := c.SystemArtifacts().List(ctx, v1.SystemArtifactFilter{
+		SessionIDs: []string{session.ID},
+		Q:          key,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, alive.TotalCount)
+
+	history, err := c.SystemArtifacts().List(ctx, v1.SystemArtifactFilter{
+		SessionIDs:     []string{session.ID},
+		Q:              key,
+		IncludeDeleted: true,
+		Sort:           "occurred_at",
+		Order:          "asc",
+	})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, history.TotalCount, 3)
+	last := history.Items[len(history.Items)-1]
+	assert.Equal(t, "delete", last.Operation)
+}
+
+func TestE2E_SystemArtifact_ExplicitCRUD_WithCollectorsOff(t *testing.T) {
+	baseURL, cleanup := startArtifactE2EServer(t)
+	defer cleanup()
+
+	c := v1.New(baseURL)
+	ctx := context.Background()
+	workDir := t.TempDir()
+
+	session, err := c.CreateSession(ctx, v1.SessionRequest{
+		Agent:   "claudecode",
+		WorkDir: workDir,
+		FileChangeCollectors: &v1.FileChangeCollectors{
+			StructuredTool:   v1.BoolPtr(false),
+			ShellParser:      v1.BoolPtr(false),
+			WorkdirReconcile: v1.BoolPtr(false),
+		},
+	})
+	require.NoError(t, err)
+
+	info, err := c.GetSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, info.FileChangeCollectors)
+	assert.False(t, info.FileChangeCollectors.StructuredTool)
+	assert.False(t, info.FileChangeCollectors.ShellParser)
+	assert.False(t, info.FileChangeCollectors.WorkdirReconcile)
+
+	key := "manual/off.txt"
+	absPath := filepath.Join(workDir, "manual", "off.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(absPath), 0o755))
+	require.NoError(t, os.WriteFile(absPath, []byte("manual"), 0o644))
+
+	put, err := c.SystemArtifacts().Put(ctx, key, v1.SystemArtifactWriteRequest{
+		SessionID: session.ID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "created", put.Status)
+
+	page, err := c.SystemArtifacts().List(ctx, v1.SystemArtifactFilter{
+		SessionIDs: []string{session.ID},
+		Q:          key,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, page.TotalCount)
+}
+
+func TestE2E_SystemArtifact_ContentAfterExplicitPut(t *testing.T) {
+	baseURL, cleanup := startArtifactE2EServer(t)
+	defer cleanup()
+
+	c := v1.New(baseURL)
+	ctx := context.Background()
+	workDir := t.TempDir()
+
+	session, err := c.CreateSession(ctx, v1.SessionRequest{
+		Agent:   "claudecode",
+		WorkDir: workDir,
+	})
+	require.NoError(t, err)
+
+	key := "manual/content.txt"
+	absPath := filepath.Join(workDir, "manual", "content.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(absPath), 0o755))
+	require.NoError(t, os.WriteFile(absPath, []byte("manual-content"), 0o644))
+
+	_, err = c.SystemArtifacts().Put(ctx, key, v1.SystemArtifactWriteRequest{
+		SessionID: session.ID,
+	})
+	require.NoError(t, err)
+
+	rc, err := c.SystemArtifacts().Download(ctx, key)
+	require.NoError(t, err)
+	defer rc.Close()
+
+	data, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Equal(t, "manual-content", string(data))
 }
 
 // TestE2E_ArtifactPipeline_FullLifecycle exercises the complete artifact pipeline

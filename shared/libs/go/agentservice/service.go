@@ -59,16 +59,16 @@ type Server struct {
 	gatewayHealthMu   sync.Mutex
 	pollCancel        context.CancelFunc
 	// Artifact support (optional; nil disables artifact tracking and API).
-	artifactStore      store.ArtifactStore
-	artifactStorage    *artifactstorage.UserArtifactStorage
-	artifactWorkDir    string
-	toolAnalyzer       *analyzer.ToolCallAnalyzer
-	sessionSnapshots   map[string]analyzer.DirSnapshot
-	sessionSnapshotsMu sync.Mutex
-	summarizer         portable.Summarizer
-	supplementCfg      config.SupplementConfig
-	processRetry       config.ProcessRetryConfig
-	processRetryCustom bool
+	artifactStore           store.ArtifactStore
+	artifactStorage         *artifactstorage.UserArtifactStorage
+	artifactWorkDir         string
+	toolAnalyzer            *analyzer.ToolCallAnalyzer
+	sessionSnapshots        map[string]analyzer.DirSnapshot
+	sessionSnapshotsMu      sync.Mutex
+	summarizer              portable.Summarizer
+	supplementCfg           config.SupplementConfig
+	processRetry            config.ProcessRetryConfig
+	processRetryCustom      bool
 	sseDrainTimeout         time.Duration
 	ssePostResultDrain      time.Duration
 	toolHeartbeatInterval   time.Duration // 0 = DefaultToolHeartbeatInterval unless configured off
@@ -486,7 +486,13 @@ func (s *Server) HTTPHandler() http.Handler {
 
 		// Register system artifact routes when an ArtifactStore is configured.
 		if s.artifactStore != nil {
-			artifactapi.NewSystemArtifactHandler(s.artifactStore).
+			artifactapi.NewSystemArtifactHandler(s.artifactStore, func(sessionID string) (string, bool) {
+				rec, err := s.sessions.Get(sessionID)
+				if err != nil || rec == nil || rec.WorkDir == "" {
+					return "", false
+				}
+				return rec.WorkDir, true
+			}).
 				RegisterRoutes(mux, "/api/v1/artifacts/system")
 		}
 		// Register user artifact routes when both store and storage are configured.

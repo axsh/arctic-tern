@@ -49,6 +49,56 @@ func stubArtifactServer(t *testing.T) *httptest.Server {
 		path := strings.TrimPrefix(r.URL.Path, "/api/v1/artifacts/system/")
 		path = strings.TrimPrefix(path, "/")
 		switch {
+		case path == "events" && r.Method == http.MethodPost:
+			var req map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"source":         "system",
+				"key":            req["key"],
+				"operation":      req["operation"],
+				"status":         "appended",
+				"session_id":     req["session_id"],
+				"turn_id":        req["turn_id"],
+				"correlation_id": req["correlation_id"],
+				"tool_name":      "api:system_manual",
+				"occurred_at":    time.Now().Format(time.RFC3339),
+			})
+		case r.Method == http.MethodPut:
+			var req map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			status := "created"
+			code := http.StatusCreated
+			op := "create"
+			if strings.Contains(path, "existing") {
+				status = "updated"
+				code = http.StatusOK
+				op = "update"
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"source":         "system",
+				"key":            path,
+				"operation":      op,
+				"status":         status,
+				"session_id":     req["session_id"],
+				"turn_id":        req["turn_id"],
+				"correlation_id": req["correlation_id"],
+				"tool_name":      "api:system_manual",
+				"occurred_at":    time.Now().Format(time.RFC3339),
+			})
+		case r.Method == http.MethodDelete:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"source":      "system",
+				"key":         path,
+				"operation":   "delete",
+				"status":      "deleted",
+				"tool_name":   "api:system_manual",
+				"occurred_at": time.Now().Format(time.RFC3339),
+			})
 		case path == "archive" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/zip")
 			zw := zip.NewWriter(w)
@@ -194,6 +244,57 @@ func TestSystemClient_Archive(t *testing.T) {
 
 	data, _ := io.ReadAll(rc)
 	assert.NotEmpty(t, data)
+}
+
+func TestSystemClient_Put(t *testing.T) {
+	srv := stubArtifactServer(t)
+	defer srv.Close()
+
+	c := v1.New(srv.URL)
+	resp, err := c.SystemArtifacts().Put(context.Background(), "notes/new.txt", v1.SystemArtifactWriteRequest{
+		SessionID:     "sess-1",
+		TurnID:        "turn-1",
+		CorrelationID: "corr-1",
+		ActualPath:    "/tmp/new.txt",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "notes/new.txt", resp.Key)
+	assert.Equal(t, "create", resp.Operation)
+	assert.Equal(t, "created", resp.Status)
+}
+
+func TestSystemClient_Delete(t *testing.T) {
+	srv := stubArtifactServer(t)
+	defer srv.Close()
+
+	c := v1.New(srv.URL)
+	resp, err := c.SystemArtifacts().Delete(context.Background(), "notes/new.txt", v1.SystemArtifactWriteRequest{
+		SessionID: "sess-1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "notes/new.txt", resp.Key)
+	assert.Equal(t, "delete", resp.Operation)
+	assert.Equal(t, "deleted", resp.Status)
+}
+
+func TestSystemClient_AppendEvent(t *testing.T) {
+	srv := stubArtifactServer(t)
+	defer srv.Close()
+
+	c := v1.New(srv.URL)
+	resp, err := c.SystemArtifacts().AppendEvent(context.Background(), v1.SystemArtifactAppendRequest{
+		Key:        "events/result.txt",
+		Operation:  "create",
+		SessionID:  "sess-1",
+		ActualPath: "/tmp/result.txt",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "events/result.txt", resp.Key)
+	assert.Equal(t, "create", resp.Operation)
+	assert.Equal(t, "appended", resp.Status)
 }
 
 // ---- UserArtifactClient tests ----
