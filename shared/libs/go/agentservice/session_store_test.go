@@ -104,7 +104,9 @@ func TestMemorySessionStore_StatusTransition(t *testing.T) {
 		{"active to completed", codingagent.StatusActive, codingagent.StatusCompleted, true},
 		{"active to error", codingagent.StatusActive, codingagent.StatusError, true},
 		{"active to closed", codingagent.StatusActive, codingagent.StatusClosed, true},
-		{"completed to active (invalid)", codingagent.StatusCompleted, codingagent.StatusActive, false},
+		{"completed to active", codingagent.StatusCompleted, codingagent.StatusActive, true},
+		{"error to active", codingagent.StatusError, codingagent.StatusActive, true},
+		{"closed to active (invalid)", codingagent.StatusClosed, codingagent.StatusActive, false},
 	}
 
 	for _, tt := range tests {

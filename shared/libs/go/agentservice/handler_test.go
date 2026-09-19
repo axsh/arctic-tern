@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +44,124 @@ func (s *mockCodingSession) Send(_ context.Context, _ string) (<-chan codingagen
 }
 func (s *mockCodingSession) ID() string   { return "mock-session" }
 func (s *mockCodingSession) Close() error { return nil }
+
+type gatingCodingAgent struct {
+	entered chan struct{}
+	release chan struct{}
+	creates int
+}
+
+func (a *gatingCodingAgent) Name() string { return "claudecode" }
+func (a *gatingCodingAgent) Close() error { return nil }
+func (a *gatingCodingAgent) CreateSession(_ context.Context, _ ...codingagent.SessionOption) (codingagent.Session, error) {
+	a.creates++
+	if a.creates == 1 {
+		return &mockCodingSession{}, nil
+	}
+	return &gatingCodingSession{entered: a.entered, release: a.release}, nil
+}
+
+type gatingCodingSession struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *gatingCodingSession) Send(_ context.Context, _ string) (<-chan codingagent.StreamEvent, error) {
+	ch := make(chan codingagent.StreamEvent)
+	go func() {
+		<-s.release
+		ch <- codingagent.StreamEvent{Type: codingagent.EventResult}
+		close(ch)
+	}()
+	close(s.entered)
+	return ch, nil
+}
+func (s *gatingCodingSession) ID() string   { return "gate-session" }
+func (s *gatingCodingSession) Close() error { return nil }
+
+func TestSendMessage_SetsStatusActiveBeforeStream(t *testing.T) {
+	agent := &gatingCodingAgent{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	srv := agentservice.New()
+	srv.RegisterAgent(agent)
+	handler := srv.HTTPHandler()
+
+	body, _ := json.Marshal(map[string]string{
+		"agent":       "claudecode",
+		"work_dir":    t.TempDir(),
+		"session_dir": t.TempDir(),
+	})
+	req := httptest.NewRequest("POST", "/api/v1/sessions", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", w.Code, w.Body.String())
+	}
+	var created map[string]string
+	json.NewDecoder(w.Body).Decode(&created)
+	sessionID := created["session_id"]
+
+	send := func() *httptest.ResponseRecorder {
+		msg, _ := json.Marshal(map[string]any{
+			"content": []map[string]string{{"type": "text", "text": "ping"}},
+		})
+		req := httptest.NewRequest("POST", "/api/v1/sessions/"+sessionID+"/messages", bytes.NewReader(msg))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+	if first := send(); first.Code != http.StatusOK {
+		t.Fatalf("first send status = %d body=%s", first.Code, first.Body.String())
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		second := send()
+		if second.Code != http.StatusOK {
+			errCh <- fmt.Errorf("second send status = %d body=%s", second.Code, second.Body.String())
+			return
+		}
+		errCh <- nil
+	}()
+
+	select {
+	case <-agent.entered:
+	case err := <-errCh:
+		t.Fatalf("second send finished before stream start: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for second send to enter the stream")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	var record codingagent.SessionRecord
+	for {
+		req = httptest.NewRequest("GET", "/api/v1/sessions/"+sessionID, nil)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		record = codingagent.SessionRecord{}
+		json.NewDecoder(w.Body).Decode(&record)
+		if record.Status == codingagent.StatusActive {
+			break
+		}
+		select {
+		case err := <-errCh:
+			t.Fatalf("second send finished while status=%q: %v", record.Status, err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status during second turn = %q, want active", record.Status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	close(agent.release)
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func newTestServer() (*agentservice.Server, http.Handler) {
 	srv := agentservice.New()

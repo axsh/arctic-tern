@@ -83,6 +83,18 @@ func (r *execRegistry) Unregister(id string) {
 	delete(r.exec, id)
 }
 
+func (e *activeExecution) stopReattachTimer() {
+	if e == nil {
+		return
+	}
+	e.subMu.Lock()
+	defer e.subMu.Unlock()
+	if e.reattachTimer != nil {
+		e.reattachTimer.Stop()
+		e.reattachTimer = nil
+	}
+}
+
 func (e *activeExecution) stealSubscriber() (gen int, subCtx context.Context) {
 	e.subMu.Lock()
 	defer e.subMu.Unlock()

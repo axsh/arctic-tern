@@ -71,8 +71,10 @@ func (m *MemorySessionStore) Update(s *codingagent.SessionRecord) error {
 	if !ok {
 		return ErrNotFound
 	}
-	// Validate status transition: terminal states cannot go back to active
-	if isTerminalStatus(existing.Status) && s.Status == codingagent.StatusActive {
+	// A closed session cannot be reopened. completed and error may return to
+	// active when a later turn registers, otherwise stall detection treats the
+	// previous terminal status as evidence that the new stream already ended.
+	if existing.Status == codingagent.StatusClosed && s.Status == codingagent.StatusActive {
 		return ErrInvalidTransition
 	}
 	copy := *s

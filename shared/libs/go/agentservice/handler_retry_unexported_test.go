@@ -1,6 +1,7 @@
 package agentservice
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -89,5 +90,59 @@ func TestParseExitStatus(t *testing.T) {
 	}
 	if _, ok := parseExitStatus(""); ok {
 		t.Fatal("empty should not parse")
+	}
+}
+
+type closeProbe struct {
+	closed bool
+}
+
+func (c *closeProbe) Send(context.Context, string) (<-chan codingagent.StreamEvent, error) {
+	return nil, nil
+}
+func (c *closeProbe) ID() string { return "probe" }
+func (c *closeProbe) Close() error {
+	c.closed = true
+	return nil
+}
+
+func TestDrainTimeout_DoesNotUnregisterSupersedingExecution(t *testing.T) {
+	s := New()
+	oldProbe := &closeProbe{}
+	newProbe := &closeProbe{}
+	oldExec := &activeExecution{sessionID: "s1", agentSess: oldProbe}
+	newExec := &activeExecution{sessionID: "s1", agentSess: newProbe}
+	if err := s.execRegistry.Register("s1", newExec); err != nil {
+		t.Fatal(err)
+	}
+	term := s.stopExecOnDrainTimeout("s1", oldExec)
+	if term.kind != "" || term.content != "" {
+		t.Fatalf("superseded timeout must be a no-op, got %+v", term)
+	}
+	got, ok := s.execRegistry.Get("s1")
+	if !ok || got != newExec {
+		t.Fatal("superseding execution was unregistered")
+	}
+	if oldProbe.closed || newProbe.closed {
+		t.Fatal("drain timeout closed a session it does not own")
+	}
+}
+
+func TestDrainTimeout_StopsOwnExecution(t *testing.T) {
+	s := New()
+	probe := &closeProbe{}
+	exec := &activeExecution{sessionID: "s1", agentSess: probe}
+	if err := s.execRegistry.Register("s1", exec); err != nil {
+		t.Fatal(err)
+	}
+	term := s.stopExecOnDrainTimeout("s1", exec)
+	if _, ok := s.execRegistry.Get("s1"); ok {
+		t.Fatal("own execution still registered")
+	}
+	if !probe.closed {
+		t.Fatal("own agent session was not closed")
+	}
+	if term.content != drainTimeoutTerminalContent {
+		t.Fatalf("content = %q", term.content)
 	}
 }

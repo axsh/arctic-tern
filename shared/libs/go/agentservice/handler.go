@@ -296,10 +296,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// Backfill empty model for sessions created before gateway default application.
 	s.applySessionModelDefault(record)
 
-		if exec, ok := s.execRegistry.Get(sessionID); ok {
-			writeSessionBusy(w, exec.status)
-			return
-		}
+	if exec, ok := s.execRegistry.Get(sessionID); ok {
+		writeSessionBusy(w, exec.status)
+		return
+	}
 
 	var req SendMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -457,6 +457,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 // finishActiveExecution closes the agent session and clears busy-state registries.
 func (s *Server) finishActiveExecution(sessionID string, agentSess codingagent.Session, savedFiles []string) {
+	if exec, ok := s.execRegistry.Get(sessionID); ok {
+		exec.stopReattachTimer()
+	}
 	s.ingestActiveTurn(sessionID)
 	if agentSess != nil {
 		_ = agentSess.Close()

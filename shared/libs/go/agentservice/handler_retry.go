@@ -108,7 +108,39 @@ func (s *Server) classifiedTerminal(content string) (tagged string, overloaded b
 	return codingagent.ClassifiedErrorContent(content, overloaded), overloaded
 }
 
+func (s *Server) markSessionActive(sessionID string) {
+	if s.sessions == nil {
+		return
+	}
+	rec, err := s.sessions.Get(sessionID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to set session status active", "session_id", sessionID, "error", err)
+		}
+		return
+	}
+	rec.Status = codingagent.StatusActive
+	if err := s.sessions.Update(rec); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to set session status active", "session_id", sessionID, "error", err)
+		}
+		return
+	}
+	if s.logger != nil {
+		s.logger.Debug("session status set active", "session_id", sessionID)
+	}
+}
+
 func (s *Server) stopExecOnDrainTimeout(sessionID string, exec *activeExecution) streamTerminal {
+	if exec != nil {
+		current, ok := s.execRegistry.Get(sessionID)
+		if !ok || current != exec {
+			if s.logger != nil {
+				s.logger.Debug("SSE drain timeout ignored; execution superseded", "session_id", sessionID)
+			}
+			return streamTerminal{}
+		}
+	}
 	if s.logger != nil {
 		s.logger.Warn(logSSEDrainTimedOut,
 			"session_id", sessionID,
@@ -286,6 +318,7 @@ func (s *Server) runTurn(
 				return
 			}
 			registered = true
+			s.markSessionActive(sessionID)
 			if wantSSE {
 				s.startSideEffectPump(active)
 			}
