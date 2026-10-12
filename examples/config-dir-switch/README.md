@@ -60,7 +60,7 @@ Alpha/beta config directories are created under a temp base with marker files (`
 - Do **not** terminate between turns merely to switch `config_dir`.
 - Overlay from the new `config_dir` applies on the **next** `Send*` call, not immediately at PATCH time.
 - Passing an empty `config_dir` via PATCH clears overlay (Codex restores `--ignore-user-config` on later launches).
-- See also: [Reference Manual — Web APIs](../../docs/ReferenceManual-WebAPIs.md) (PATCH session).
+- See also: [Reference Manual — Web APIs](../../docs/reference-manual-web-apis.md) (PATCH session).
 
 ## LIVE billing (optional)
 
