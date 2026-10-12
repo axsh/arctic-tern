@@ -198,8 +198,8 @@ None.（仕様レビュー済み。実行はユーザー指示 `/create-implemen
 5. **[x] Write use-cases (R8) + docs/README hub**: コミット。
 6. **[x] Rewrite top README**: R1/R8/S1/S2。コミット。
 7. **[x] Green: check script**: `./scripts/utils/check_docs_index.sh` 成功。必要ならスクリプト調整。
-8. **[/] Build**: `./scripts/process/build.sh`（Windows/Git Bash）。統合: `./scripts/process/integration_test.sh --specify TestDocsIndexLayout`（該当テストがカテゴリ必須なら合わせて指定）。
-9. **[ ] Push**: 全成功後 `git push`。
+8. **[x] Build**: `./scripts/process/build.sh`（Windows/Git Bash）。統合: `./scripts/process/integration_test.sh --specify TestDocsIndexLayout`（該当テストがカテゴリ必須なら合わせて指定）。
+9. **[/] Push**: 全成功後 `git push`。
 
 ## Verification Plan
 
