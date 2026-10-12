@@ -66,7 +66,7 @@ Defaults:
 | `Session.Respond` | `POST /api/v1/sessions/:id/respond` |
 | `Session.Terminate` | `POST /api/v1/sessions/:id/terminate` (cleanup at exit only) |
 
-See [Reference Manual — Web APIs](../../docs/ReferenceManual-WebAPIs.md) (Follow, `GET /api/v1/sessions/:id/events`).
+See [Reference Manual — Web APIs](../../docs/reference-manual-web-apis.md) (Follow, `GET /api/v1/sessions/:id/events`).
 
 ## LIVE billing (optional)
 

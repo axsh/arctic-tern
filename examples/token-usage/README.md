@@ -62,7 +62,7 @@ repAll, _ := sess.GetUsage(ctx)
 repLast, _ := sess.GetUsage(ctx, client.UsageQuery{LastN: 1})
 ```
 
-Query parameters for `GET /api/v1/sessions/:id/usage` include `last_n`, `after_turn_id`, `from_turn_id`, `to_turn_id`, `since`, and `until` (RFC3339). See `docs/ReferenceManual-WebAPIs.md`.
+Query parameters for `GET /api/v1/sessions/:id/usage` include `last_n`, `after_turn_id`, `from_turn_id`, `to_turn_id`, `since`, and `until` (RFC3339). See `docs/reference-manual-web-apis.md`.
 
 ## Note on cost
 
