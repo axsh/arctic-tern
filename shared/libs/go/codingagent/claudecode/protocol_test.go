@@ -293,3 +293,54 @@ func TestParseJSONLinesEvents_MultipleToolUse(t *testing.T) {
 		t.Errorf("second path = %v", events[1].ToolInput["path"])
 	}
 }
+
+func TestParseJSONLinesEvents_ToolResultForms(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantContents []string
+		wantIDs      []string
+	}{
+		{
+			name:         "string content",
+			input:        `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`,
+			wantContents: []string{"ok"},
+			wantIDs:      []string{"t1"},
+		},
+		{
+			name:         "array of text blocks (MCP form)",
+			input:        `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"ECHO-MARK:hello"}]}]}}`,
+			wantContents: []string{"ECHO-MARK:hello"},
+			wantIDs:      []string{"t1"},
+		},
+		{
+			name:         "two tool_result blocks in one message keep order",
+			input:        `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a"},{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"b"}]}]}}`,
+			wantContents: []string{"a", "b"},
+			wantIDs:      []string{"t1", "t2"},
+		},
+		{
+			name:  "user message without tool_result",
+			input: `{"type":"user","message":{"content":[{"type":"text","text":"hi"}]}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evs := claudecode.ParseJSONLinesEvents(tc.input)
+			if len(evs) != len(tc.wantContents) {
+				t.Fatalf("len(events) = %d, want %d", len(evs), len(tc.wantContents))
+			}
+			for i, ev := range evs {
+				if ev.Type != codingagent.EventToolResult {
+					t.Errorf("events[%d].Type = %v, want EventToolResult", i, ev.Type)
+				}
+				if ev.Content != tc.wantContents[i] {
+					t.Errorf("events[%d].Content = %q, want %q", i, ev.Content, tc.wantContents[i])
+				}
+				if ev.ToolCallID != tc.wantIDs[i] {
+					t.Errorf("events[%d].ToolCallID = %q, want %q", i, ev.ToolCallID, tc.wantIDs[i])
+				}
+			}
+		})
+	}
+}

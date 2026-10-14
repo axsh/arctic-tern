@@ -2,6 +2,8 @@ package claudecode
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/axsh/arctic-tern/shared/libs/go/codingagent"
 	"github.com/axsh/arctic-tern/shared/libs/go/logger"
@@ -43,7 +45,36 @@ type contentBlock struct {
 	Name      string         `json:"name,omitempty"`
 	Input     map[string]any `json:"input,omitempty"`
 	ToolUseID string         `json:"tool_use_id,omitempty"`
-	Content   string         `json:"content,omitempty"`
+	Content   toolResultText `json:"content,omitempty"`
+}
+
+// toolResultText is the "content" of a tool_result block. It accepts a plain string
+// or an array of content blocks (the form MCP tools return); for an array the text
+// blocks are joined with newlines. null decodes to an empty string.
+type toolResultText string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (t *toolResultText) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*t = toolResultText(str)
+		return nil
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return fmt.Errorf("tool_result content must be a string or array of content blocks: %w", err)
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	*t = toolResultText(strings.Join(parts, "\n"))
+	return nil
 }
 
 type claudeUsageNums struct {
@@ -154,10 +185,9 @@ func ParseJSONLinesEvents(line string, logs ...logger.Logger) []*codingagent.Str
 				if block.Type == "tool_result" {
 					out = append(out, &codingagent.StreamEvent{
 						Type:       codingagent.EventToolResult,
-						Content:    block.Content,
+						Content:    string(block.Content),
 						ToolCallID: block.ToolUseID,
 					})
-					break
 				}
 			}
 		}
