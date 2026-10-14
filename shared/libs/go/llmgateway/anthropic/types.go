@@ -1,6 +1,10 @@
 package anthropic
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // --- Anthropic Types ---
 // These types define the Anthropic Messages API request/response format.
@@ -34,14 +38,40 @@ type Message struct {
 // ContentBlock represents a content block in Anthropic format.
 // It supports text, tool_use, tool_result, and image block types.
 type ContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	Source    *ImageSource    `json:"source,omitempty"` // populated when type="image"
+	Type      string            `json:"type"`
+	Text      string            `json:"text,omitempty"`
+	ID        string            `json:"id,omitempty"`
+	Name      string            `json:"name,omitempty"`
+	Input     json.RawMessage   `json:"input,omitempty"`
+	ToolUseID string            `json:"tool_use_id,omitempty"`
+	Content   ToolResultContent `json:"content,omitempty"`
+	Source    *ImageSource      `json:"source,omitempty"` // populated when type="image"
+}
+
+// ToolResultContent is the "content" of a tool_result block. It accepts a plain
+// string or an array of content blocks (the form MCP tools return); for an array
+// the text blocks are joined with newlines. null decodes to an empty string.
+type ToolResultContent string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (c *ToolResultContent) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*c = ToolResultContent(str)
+		return nil
+	}
+	var blocks []ContentBlock
+	if err := json.Unmarshal(data, &blocks); err != nil {
+		return fmt.Errorf("tool_result content must be a string or array of content blocks: %w", err)
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	*c = ToolResultContent(strings.Join(parts, "\n"))
+	return nil
 }
 
 // ImageSource represents the source of an image content block.

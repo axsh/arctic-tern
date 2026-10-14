@@ -443,3 +443,37 @@ func ptr[T any](v T) *T {
 func strPtr(s string) *string {
 	return &s
 }
+
+func TestConvertMessage_ToolResultContentForms(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentJSON string
+		wantOutput  string
+	}{
+		{"plain string", `"hello"`, "hello"},
+		{"array of text blocks", `[{"type":"text","text":"a"},{"type":"text","text":"b"}]`, "a\nb"},
+		{"array with non-text block is skipped", `[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"x"}},{"type":"text","text":"t"}]`, "t"},
+		{"empty array", `[]`, ""},
+		{"null", `null`, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `[{"type":"tool_result","tool_use_id":"toolu_1","content":` + tc.contentJSON + `}]`
+			out, err := convertMessage(Message{Role: "user", Content: json.RawMessage(raw)})
+			require.NoError(t, err)
+			require.Len(t, out, 1)
+			require.NotNil(t, out[0].Type)
+			assert.Equal(t, bifrostSchemas.ResponsesMessageTypeFunctionCallOutput, *out[0].Type)
+			require.NotNil(t, out[0].ResponsesToolMessage)
+			assert.Equal(t, "toolu_1", *out[0].ResponsesToolMessage.CallID)
+			require.NotNil(t, out[0].ResponsesToolMessage.Output.ResponsesToolCallOutputStr)
+			assert.Equal(t, tc.wantOutput, *out[0].ResponsesToolMessage.Output.ResponsesToolCallOutputStr)
+		})
+	}
+
+	t.Run("invalid content form is an error", func(t *testing.T) {
+		raw := `[{"type":"tool_result","tool_use_id":"toolu_1","content":123}]`
+		_, err := convertMessage(Message{Role: "user", Content: json.RawMessage(raw)})
+		require.Error(t, err)
+	})
+}
