@@ -315,9 +315,14 @@ func (s *Server) RegisterAgent(agent codingagent.CodingAgent) {
 
 // Launch starts the AgentService HTTP server on the given port.
 // port=0 uses OS-assigned ephemeral port. Non-blocking.
+// The listen host defaults to 127.0.0.1 and can be overridden with TERN_AGENT_BIND_HOST.
 func (s *Server) Launch(ctx context.Context, port int) error {
 	handler := s.HTTPHandler()
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	host := os.Getenv("TERN_AGENT_BIND_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		return fmt.Errorf("agentservice listen: %w", err)
 	}
