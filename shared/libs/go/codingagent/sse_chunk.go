@@ -66,6 +66,7 @@ func buildChunkedToolResult(ev StreamEvent, chunkSize, limit int) ([]StreamEvent
 			Type:       EventToolResultPart,
 			Content:    content[start:end],
 			ToolName:   ev.ToolName,
+			ToolCallID: ev.ToolCallID,
 			ChunkID:    chunkID,
 			ChunkIndex: i,
 			ChunkTotal: total,
@@ -73,10 +74,11 @@ func buildChunkedToolResult(ev StreamEvent, chunkSize, limit int) ([]StreamEvent
 	}
 
 	out = append(out, StreamEvent{
-		Type:     EventToolResult,
-		ToolName: ev.ToolName,
-		ChunkID:  chunkID,
-		Content:  "",
+		Type:       EventToolResult,
+		ToolName:   ev.ToolName,
+		ToolCallID: ev.ToolCallID,
+		ChunkID:    chunkID,
+		Content:    "",
 	})
 
 	for _, wireEv := range out {
