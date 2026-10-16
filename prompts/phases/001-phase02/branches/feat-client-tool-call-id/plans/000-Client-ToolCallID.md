@@ -29,12 +29,17 @@
   - SSE の `raw` 構造体に `ToolCallID string \`json:"tool_call_id,omitempty"\`` を追加する。
   - `tool_result` 経路（`Event{Type: EventToolResult, ...}`）と汎用経路（`tool_use` 含む）の両方で `ToolCallID: raw.ToolCallID` を設定する。
   - `Event` を値で比較・リテラル生成している箇所（テスト含む）に影響がないことを確認する。
-- [MODIFY] `docs/reference-manual-web-apis.md`（`tool_use` / `tool_result` イベントの項に `tool_call_id` を追記。Claude Code のみで設定される旨も書く）
-- 派生物の確認: legacy `client` パッケージは現在のツリーに存在しない。`docs/` 内のクライアント解説（`docs/client-sse-tool-input.md` 等）に Event フィールド一覧があれば同時に更新する。
+- [MODIFY] `docs/client-sse-tool-input.md`（`tool_call_id` の節を追加。Claude Code のみで設定される旨も書く）、`docs/sse-chunk-protocol.md`（チャンク経路で ID が全イベントに載る旨）
+- legacy `client` パッケージは現在のツリーに存在しない。
 
 ### 検証
 - `go test ./client/... ./shared/libs/go/codingagent/...`
 - `bash scripts/process/build.sh`（既知の失敗以外が増えないこと）
+
+## 実施結果
+
+- Phase 1・2 完了。ドキュメントの更新先は上記のとおり（当初案の `reference-manual-web-apis.md` にはイベントのフィールド一覧がないため変更）。
+- 要確認事項は既定（対象外 / 別扱い / 変更なし）で実施した（仮）。
 
 ## 要確認事項
 
