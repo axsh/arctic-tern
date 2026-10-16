@@ -157,7 +157,7 @@ func convertMessage(msg Message) ([]bifrostSchemas.ResponsesMessage, error) {
 
 			// Convert tool_result -> function_call_output
 			callID := block.ToolUseID
-			output := block.Content
+			output := string(block.Content)
 			msgType := bifrostSchemas.ResponsesMessageTypeFunctionCallOutput
 			result = append(result, bifrostSchemas.ResponsesMessage{
 				Type: &msgType,

@@ -6,6 +6,8 @@ CAWA (Coding Agent Web API) v1 provides RESTful API and Server-Sent Events (SSE)
 
 By default, all API endpoints are exposed at `http://localhost:3100` (customizable via `agent_service.port` in the configuration file `config.yaml`).
 
+The listen host is `127.0.0.1` unless the environment variable `TERN_AGENT_BIND_HOST` is set (for example `0.0.0.0` when Tern runs in a container and the port is published to the host). The API has no authentication, so restrict how the published port is exposed (for example publish it on the host's loopback address only).
+
 ---
 
 ## Endpoint List
