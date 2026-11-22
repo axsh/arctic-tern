@@ -190,7 +190,7 @@ func launchArgsByNumber(t *testing.T, launchLog string, n int) string {
 4. [x] **Integration test**: `tests/common_sandbox_mode_test.go` に resume 2 ターン目検証を追加する。
 5. [x] **Docs**: `docs/reference-manual-web-apis.md` を更新する。
 6. [x] **Verify**: build + `--specify TestSandboxMode` + `--specify TestStreamReconnect`。
-7. [/] **Commit**: 意味単位で commit（テスト → 実装 → 統合/docs）。全成功後に push。
+7. [x] **Commit**: 意味単位で commit（テスト → 実装 → 統合/docs）。全成功後に push。
 
 ## Verification Plan
 
