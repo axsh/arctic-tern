@@ -132,7 +132,7 @@ func replaceWithCopy(src, dst string) error {
 4. [x] **Docs**: `reference-manual-web-apis.md`（+ example README 必要時）。
 5. [x] **Verify**: `./scripts/process/build.sh` + `--specify ConfigDir`。
 6. [x] **Branch regression**: `--specify "TestSandboxMode|TestStreamReconnect|ConfigDir"`（本環境の integration_test.sh は `--categories` 非対応のため同等フィルタで実施）。
-7. [/] **Commit & push**.
+7. [x] **Commit & push**.
 
 ## Verification Plan
 
