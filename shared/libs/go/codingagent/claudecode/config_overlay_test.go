@@ -45,6 +45,15 @@ func TestApplyClaudeConfigDir(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(sessionDir, "skills", "demo", "SKILL.md")); err != nil {
 			t.Fatalf("skill missing: %v", err)
 		}
+		for _, name := range []string{"skills", "settings.json"} {
+			fi, err := os.Lstat(filepath.Join(sessionDir, name))
+			if err != nil {
+				t.Fatalf("Lstat %s: %v", name, err)
+			}
+			if fi.Mode()&os.ModeSymlink != 0 {
+				t.Fatalf("%s must be a copy, not a symlink (Issue #71)", name)
+			}
+		}
 		data, err := os.ReadFile(marker)
 		if err != nil || string(data) != "keep" {
 			t.Fatalf("projects marker lost: %q %v", data, err)

@@ -24,10 +24,12 @@ var protectedSessionBasenames = map[string]struct{}{
 	"native":        {},
 }
 
-// OverlayConfigDir copies or symlinks allowlisted names from configDir into
-// sessionDir. Only entries that exist under configDir are applied. Existing
-// session-only data outside the allowlist is never removed. Protected names
-// under sessionDir are never deleted even if listed in allowlist by mistake.
+// OverlayConfigDir copies allowlisted names from configDir into sessionDir.
+// Only entries that exist under configDir are applied. Existing session-only
+// data outside the allowlist is never removed. Protected names under
+// sessionDir are never deleted even if listed in allowlist by mistake.
+// Destinations are always plain copies (never symlinks) so writes under the
+// vendor home cannot mutate the caller's config_dir (Issue #71).
 func OverlayConfigDir(sessionDir, configDir string, allowlist []string) error {
 	if sessionDir == "" {
 		return fmt.Errorf("overlay config_dir: sessionDir is empty")
@@ -61,21 +63,18 @@ func OverlayConfigDir(sessionDir, configDir string, allowlist []string) error {
 			return fmt.Errorf("overlay config_dir: stat %s: %w", src, err)
 		}
 		dst := filepath.Join(sessionDir, name)
-		if err := linkOrCopy(src, dst); err != nil {
+		if err := replaceWithCopy(src, dst); err != nil {
 			return fmt.Errorf("overlay config_dir: apply %s: %w", name, err)
 		}
 	}
 	return nil
 }
 
-// linkOrCopy creates dst as a symlink to src when possible; otherwise
-// recursively copies src to dst. If dst exists, it is removed first.
-func linkOrCopy(src, dst string) error {
+// replaceWithCopy removes dst if present, then recursively copies src to dst.
+// Symlinks are never created.
+func replaceWithCopy(src, dst string) error {
 	if err := os.RemoveAll(dst); err != nil {
 		return fmt.Errorf("remove existing dst: %w", err)
-	}
-	if err := os.Symlink(src, dst); err == nil {
-		return nil
 	}
 	return copyPath(src, dst)
 }
