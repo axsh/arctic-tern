@@ -47,6 +47,15 @@ func TestApplyCodexConfigDir(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(sessionDir, "config.toml")); err != nil {
 			t.Fatalf("config.toml missing: %v", err)
 		}
+		for _, name := range []string{"skills", "config.toml"} {
+			fi, err := os.Lstat(filepath.Join(sessionDir, name))
+			if err != nil {
+				t.Fatalf("Lstat %s: %v", name, err)
+			}
+			if fi.Mode()&os.ModeSymlink != 0 {
+				t.Fatalf("%s must be a copy, not a symlink (Issue #71)", name)
+			}
+		}
 		data, err := os.ReadFile(keep)
 		if err != nil || string(data) != "safe" {
 			t.Fatalf("sessions keep lost: %q %v", data, err)

@@ -273,7 +273,7 @@ func TestCodexBuildArgs_ResumeUsesExecResume(t *testing.T) {
 	if !strings.Contains(joined, "exec") || !strings.Contains(joined, "resume") {
 		t.Fatalf("expected exec resume, got %v", args)
 	}
-	foundResume, foundID, foundJSON := false, false, false
+	foundResume, foundID, foundJSON, foundBypass := false, false, false, false
 	for _, a := range args {
 		if a == "resume" {
 			foundResume = true
@@ -284,12 +284,65 @@ func TestCodexBuildArgs_ResumeUsesExecResume(t *testing.T) {
 		if a == "--json" {
 			foundJSON = true
 		}
+		if a == "--dangerously-bypass-approvals-and-sandbox" {
+			foundBypass = true
+		}
 	}
 	if !foundResume || !foundID {
 		t.Fatalf("resume session id missing: %v", args)
 	}
 	if !foundJSON {
 		t.Fatal("expected --json in resume args")
+	}
+	if !foundBypass {
+		t.Fatalf("expected bypass flag on resume danger-full-access, got %v", args)
+	}
+	if hasFlagPair(args, "-s", codingagent.SandboxModeReadOnly) || hasFlagPair(args, "-s", codingagent.SandboxModeWorkspaceWrite) {
+		t.Fatalf("resume must not pass -s, got %v", args)
+	}
+	if hasSandboxModeConfigOverride(args) {
+		t.Fatalf("danger-full-access resume must not pass -c sandbox_mode, got %v", args)
+	}
+}
+
+func TestCodexBuildArgs_ResumeReadOnlyUsesConfigOverride(t *testing.T) {
+	args := codex.BuildArgs("hi", nil, true, "abc-123", codingagent.SandboxModeReadOnly)
+	if len(args) < 2 || args[0] != "exec" || args[1] != "resume" {
+		t.Fatalf("expected exec resume ..., got %v", args)
+	}
+	if hasFlagPair(args, "-s", codingagent.SandboxModeReadOnly) {
+		t.Fatalf("resume must not pass -s read-only (Issue #70), got %v", args)
+	}
+	if !hasFlagPair(args, "-c", `sandbox_mode="read-only"`) {
+		t.Fatalf("expected -c sandbox_mode=\"read-only\", got %v", args)
+	}
+	for _, a := range args {
+		if strings.Contains(a, "bypass") {
+			t.Fatalf("bypass must be omitted, got %v", args)
+		}
+	}
+}
+
+func TestCodexBuildArgs_ResumeWorkspaceWriteUsesConfigOverride(t *testing.T) {
+	args := codex.BuildArgs("hi", nil, true, "abc-123", codingagent.SandboxModeWorkspaceWrite)
+	if len(args) < 2 || args[0] != "exec" || args[1] != "resume" {
+		t.Fatalf("expected exec resume ..., got %v", args)
+	}
+	if hasFlagPair(args, "-s", codingagent.SandboxModeWorkspaceWrite) {
+		t.Fatalf("resume must not pass -s workspace-write (Issue #70), got %v", args)
+	}
+	if !hasFlagPair(args, "-c", `sandbox_mode="workspace-write"`) {
+		t.Fatalf("expected -c sandbox_mode=\"workspace-write\", got %v", args)
+	}
+}
+
+func TestCodexBuildArgs_ResumeEmptySandboxDefaultsReadOnlyConfig(t *testing.T) {
+	args := codex.BuildArgs("hi", nil, true, "sid", "")
+	if !hasFlagPair(args, "-c", `sandbox_mode="read-only"`) {
+		t.Fatalf("empty sandboxMode on resume should use -c sandbox_mode=\"read-only\", got %v", args)
+	}
+	if hasFlagPair(args, "-s", codingagent.SandboxModeReadOnly) {
+		t.Fatalf("resume must not pass -s, got %v", args)
 	}
 }
 
@@ -303,4 +356,22 @@ func TestCodexBuildArgs_NoResumeKeepsExec(t *testing.T) {
 			t.Fatal("resume must be omitted when resumeSessionID is empty")
 		}
 	}
+}
+
+func hasFlagPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSandboxModeConfigOverride(args []string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && strings.HasPrefix(args[i+1], "sandbox_mode=") {
+			return true
+		}
+	}
+	return false
 }

@@ -69,9 +69,60 @@ func TestOverlayConfigDir(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Symlink reads live content; copy reads new content after re-apply.
+		// Re-apply replaces the previous copy with updated source content.
 		if string(data) != "v2" {
 			t.Fatalf("got %q, want v2", data)
+		}
+	})
+
+	t.Run("overlay destinations are not symlinks", func(t *testing.T) {
+		configDir := t.TempDir()
+		sessionDir := t.TempDir()
+		skillPath := filepath.Join(configDir, "skills", "demo", "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(skillPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(skillPath, []byte("skill"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "settings.json"), []byte(`{}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := codingagent.OverlayConfigDir(sessionDir, configDir, []string{"skills", "settings.json"}); err != nil {
+			t.Fatalf("OverlayConfigDir: %v", err)
+		}
+		for _, name := range []string{"skills", "settings.json"} {
+			dst := filepath.Join(sessionDir, name)
+			fi, err := os.Lstat(dst)
+			if err != nil {
+				t.Fatalf("Lstat %s: %v", dst, err)
+			}
+			if fi.Mode()&os.ModeSymlink != 0 {
+				t.Fatalf("%s is a symlink; overlay must copy (Issue #71)", dst)
+			}
+		}
+	})
+
+	t.Run("writes through overlay do not mutate config_dir", func(t *testing.T) {
+		configDir := t.TempDir()
+		sessionDir := t.TempDir()
+		src := filepath.Join(configDir, "config.toml")
+		if err := os.WriteFile(src, []byte("original\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := codingagent.OverlayConfigDir(sessionDir, configDir, []string{"config.toml"}); err != nil {
+			t.Fatalf("OverlayConfigDir: %v", err)
+		}
+		dst := filepath.Join(sessionDir, "config.toml")
+		if err := os.WriteFile(dst, []byte("mutated-by-agent\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "original\n" {
+			t.Fatalf("config_dir mutated through overlay: got %q", data)
 		}
 	})
 
