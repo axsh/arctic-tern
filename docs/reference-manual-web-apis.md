@@ -158,9 +158,9 @@ Initializes a new coding session.
   - `session_dir` (string, Optional): Override for the **canonical session folder** (Tern leaf). Defaults to `{storage_root}/.tern/{session_id}`. This is not the Codex/Claude CLI home; do not place CLI homes under `{session_dir}/native`.
   - `config_dir` (string, Optional): Agent config set directory (skills / rules / settings). When set, Tern overlays allowlisted entries into the agent vendor home before launching the agent (`{storage_root}/.claude` for Claude Code, `{storage_root}/.codex` for Codex, or the canonical session folder for Wayfinder). When omitted, behavior is unchanged from previous versions (no overlay).
   - `sandbox_mode` (string, Optional): Per-session Codex/Claude sandbox policy. Allowed values:
-    - `read-only` (default when omitted and `agent_service.disable_sandbox` is false): Codex `-s read-only` (workspace writes blocked).
-    - `workspace-write`: Codex `-s workspace-write` (R/W under the workspace; sandbox retained). Preferred for Agent Service workloads that need file edits without full bypass.
-    - `danger-full-access`: Codex `--dangerously-bypass-approvals-and-sandbox` (full bypass). Also used when CreateSession omits `sandbox_mode` and the server has `agent_service.disable_sandbox: true`.
+    - `read-only` (default when omitted and `agent_service.disable_sandbox` is false): Codex fresh `exec` uses `-s read-only` (workspace writes blocked). On `codex exec resume`, Tern passes `-c sandbox_mode="read-only"` instead of `-s` because current codex-cli rejects `-s` after `resume` (Issue [#70](https://github.com/axsh/arctic-tern/issues/70)).
+    - `workspace-write`: Codex fresh `exec` uses `-s workspace-write` (R/W under the workspace; sandbox retained). Resume uses `-c sandbox_mode="workspace-write"`. Preferred for Agent Service workloads that need file edits without full bypass.
+    - `danger-full-access`: Codex `--dangerously-bypass-approvals-and-sandbox` on both fresh `exec` and `exec resume` (full bypass). Also used when CreateSession omits `sandbox_mode` and the server has `agent_service.disable_sandbox: true`.
     - Precedence: explicit `sandbox_mode` > server `disable_sandbox` > `read-only`.
     - Claude Code mapping: `danger-full-access` sets `CLAUDE_CODE_SKIP_SANDBOX=1`; `read-only` / `workspace-write` do not (Claude still uses `--permission-mode bypassPermissions`). See Issue [#54](https://github.com/axsh/arctic-tern/issues/54).
     - `sandbox_mode` is fixed at CreateSession time (not changeable via PATCH).

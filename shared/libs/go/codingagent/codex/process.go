@@ -72,23 +72,35 @@ func resolveTimeouts(cfg *codingagent.SessionConfig) (idleSec, maxSec int) {
 // When resumeSessionID != "", uses "codex exec resume <id>" to continue a thread.
 // When prompt is non-empty, "-" is appended to instruct codex to read from stdin.
 //
-// sandboxMode selects Codex isolation (aligned with codex -s):
-//   - read-only: -s read-only (no full bypass)
-//   - workspace-write: -s workspace-write (writable workspace, still sandboxed)
-//   - danger-full-access: --dangerously-bypass-approvals-and-sandbox
+// sandboxMode selects Codex isolation:
+//   - fresh exec: read-only / workspace-write use -s <mode>; danger-full-access uses
+//     --dangerously-bypass-approvals-and-sandbox
+//   - resume: read-only / workspace-write use -c sandbox_mode="<mode>" because
+//     current codex-cli rejects -s after "resume" (Issue #70); danger-full-access
+//     still uses the bypass flag
 // Empty sandboxMode is treated as read-only.
 func BuildArgs(prompt string, configOverrides []string, ignoreUserConfig bool, resumeSessionID string, sandboxMode string) []string {
 	common := []string{
 		"--json",
 	}
 	mode := codingagent.EffectiveSandboxMode(sandboxMode)
+	resuming := resumeSessionID != ""
 	switch mode {
 	case codingagent.SandboxModeDangerFullAccess:
 		common = append(common, "--dangerously-bypass-approvals-and-sandbox")
 	case codingagent.SandboxModeWorkspaceWrite:
-		common = append(common, "-s", codingagent.SandboxModeWorkspaceWrite)
+		if resuming {
+			// Issue #70: codex exec resume rejects -s after resume; use -c instead.
+			common = append(common, "-c", `sandbox_mode="workspace-write"`)
+		} else {
+			common = append(common, "-s", codingagent.SandboxModeWorkspaceWrite)
+		}
 	default:
-		common = append(common, "-s", codingagent.SandboxModeReadOnly)
+		if resuming {
+			common = append(common, "-c", `sandbox_mode="read-only"`)
+		} else {
+			common = append(common, "-s", codingagent.SandboxModeReadOnly)
+		}
 	}
 	if ignoreUserConfig {
 		common = append(common, "--ignore-user-config")
@@ -96,7 +108,7 @@ func BuildArgs(prompt string, configOverrides []string, ignoreUserConfig bool, r
 	common = append(common, configOverrides...)
 
 	var args []string
-	if resumeSessionID != "" {
+	if resuming {
 		args = append([]string{"exec", "resume"}, common...)
 		args = append(args, resumeSessionID)
 	} else {

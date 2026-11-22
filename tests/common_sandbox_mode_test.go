@@ -114,7 +114,83 @@ func TestSandboxMode_InvalidValue(t *testing.T) {
 	}
 }
 
+func TestSandboxMode_ResumeSecondTurnUsesConfigOverride(t *testing.T) {
+	launchLog, baseURL, cleanup := startSandboxModeCodexServerWithThread(t, false, map[int]string{1: "thr-ro"})
+	defer cleanup()
+
+	workDir := t.TempDir()
+	sessionID := createSandboxModeSession(t, baseURL, workDir, "")
+	drainSandboxModeTurn(t, baseURL, sessionID, "turn1")
+	drainSandboxModeTurn(t, baseURL, sessionID, "turn2")
+
+	if got := testfake.LaunchCount(t, launchLog); got != 2 {
+		t.Fatalf("launch count = %d, want 2 (no self-heal third launch); log=\n%s", got, readLaunchLog(t, launchLog))
+	}
+	line1 := launchArgsByNumber(t, launchLog, 1)
+	if strings.Contains(line1, "resume") {
+		t.Fatalf("launch 1 must be fresh exec, got %q", line1)
+	}
+	if !strings.Contains(line1, "-s "+codingagent.SandboxModeReadOnly) {
+		t.Fatalf("launch 1 expected -s read-only, got %q", line1)
+	}
+	line2 := launchArgsByNumber(t, launchLog, 2)
+	if !strings.Contains(line2, "resume") {
+		t.Fatalf("launch 2 expected resume, got %q", line2)
+	}
+	if strings.Contains(line2, "-s ") {
+		t.Fatalf("launch 2 must not pass -s (Issue #70), got %q", line2)
+	}
+	if !strings.Contains(line2, `sandbox_mode="read-only"`) {
+		t.Fatalf("launch 2 expected -c sandbox_mode=\"read-only\", got %q", line2)
+	}
+}
+
+func TestSandboxMode_ResumeSecondTurnWorkspaceWrite(t *testing.T) {
+	launchLog, baseURL, cleanup := startSandboxModeCodexServerWithThread(t, false, map[int]string{1: "thr-ww"})
+	defer cleanup()
+
+	workDir := t.TempDir()
+	sessionID := createSandboxModeSession(t, baseURL, workDir, codingagent.SandboxModeWorkspaceWrite)
+	drainSandboxModeTurn(t, baseURL, sessionID, "turn1")
+	drainSandboxModeTurn(t, baseURL, sessionID, "turn2")
+
+	if got := testfake.LaunchCount(t, launchLog); got != 2 {
+		t.Fatalf("launch count = %d, want 2; log=\n%s", got, readLaunchLog(t, launchLog))
+	}
+	line2 := launchArgsByNumber(t, launchLog, 2)
+	if !strings.Contains(line2, "resume") {
+		t.Fatalf("launch 2 expected resume, got %q", line2)
+	}
+	if strings.Contains(line2, "-s ") {
+		t.Fatalf("launch 2 must not pass -s, got %q", line2)
+	}
+	if !strings.Contains(line2, `sandbox_mode="workspace-write"`) {
+		t.Fatalf("launch 2 expected sandbox_mode=\"workspace-write\", got %q", line2)
+	}
+}
+
+func drainSandboxModeTurn(t *testing.T, baseURL, sessionID, message string) {
+	t.Helper()
+	resp := sendE2EMessage(t, baseURL, sessionID, message, 30*time.Second)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read SSE body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("send %q: status=%d body=%s", message, resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"type":"result"`) {
+		t.Fatalf("send %q: missing result event, body=%s", message, body)
+	}
+}
+
 func startSandboxModeCodexServer(t *testing.T, disableSandbox bool) (launchLog, baseURL string, cleanup func()) {
+	t.Helper()
+	return startSandboxModeCodexServerWithThread(t, disableSandbox, nil)
+}
+
+func startSandboxModeCodexServerWithThread(t *testing.T, disableSandbox bool, threadByLaunch map[int]string) (launchLog, baseURL string, cleanup func()) {
 	t.Helper()
 	dir := t.TempDir()
 	launchLog = filepath.Join(dir, "launch.log")
@@ -123,7 +199,8 @@ func startSandboxModeCodexServer(t *testing.T, disableSandbox bool) (launchLog, 
 			`{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}`,
 			`{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}`,
 		},
-		LaunchLogPath: launchLog,
+		LaunchLogPath:    launchLog,
+		ThreadIDByLaunch: threadByLaunch,
 	})
 
 	log := logger.NewDefault(logger.LevelInfo)
@@ -148,6 +225,33 @@ func startSandboxModeCodexServer(t *testing.T, disableSandbox bool) (launchLog, 
 	baseURL = "http://localhost:" + strconv.Itoa(port)
 	cleanup = func() { _ = srv.Shutdown(context.Background()) }
 	return launchLog, baseURL, cleanup
+}
+
+func readLaunchLog(t *testing.T, launchLog string) string {
+	t.Helper()
+	data, err := os.ReadFile(launchLog)
+	if err != nil {
+		t.Fatalf("read launch log: %v", err)
+	}
+	return string(data)
+}
+
+func launchArgsByNumber(t *testing.T, launchLog string, n int) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	prefix := "launch " + strconv.Itoa(n) + " args: "
+	var text string
+	for time.Now().Before(deadline) {
+		text = readLaunchLog(t, launchLog)
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, prefix) {
+				return strings.TrimPrefix(line, prefix)
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("launch %d args not found in log:\n%s", n, text)
+	return ""
 }
 
 func createSandboxModeSession(t *testing.T, baseURL, workDir, sandboxMode string) string {
