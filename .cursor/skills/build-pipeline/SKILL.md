@@ -1,8 +1,9 @@
 ---
 name: build-pipeline
-description: Runs the full build, unit tests, and integration/E2E tests pipeline. Use when the user asks to build the project, run all tests, verify changes, or after completing an implementation to validate correctness.
-disable-model-invocation: true
+description: Build, Test, and Verify Pipeline
+disable-model-invocation: false
 ---
+
 
 # Build and Verification Workflow
 
@@ -10,7 +11,7 @@ disable-model-invocation: true
 
 > [!IMPORTANT]
 > テスト実行の詳細ルール（Linux/Remote-SSH 対応、エラー修正フロー、タイムアウト方針等）は
-> `prompts/rules/testing-rules.md` を参照すること。
+> `.cursor/rules/testing-rules.mdc` を参照すること。
 
 ## 1. Full Build & Unit Test
 
@@ -20,7 +21,7 @@ disable-model-invocation: true
 // turbo
 ./scripts/process/build.sh
 
-> **Linux / Remote-SSH**: `./scripts/process/build.sh --skip-etc` を使うこと（詳細は testing-rules.md Section 1 参照）。
+> **Linux / Remote-SSH**: `./scripts/process/build.sh --skip-etc` を使うこと（詳細は `.cursor/rules/testing-rules.mdc` Section 1 参照）。
 
 ## 2. Environment Setup
 
@@ -36,7 +37,7 @@ disable-model-invocation: true
 // turbo
 ./scripts/process/integration_test.sh
 
-> **Linux / Remote-SSH**: `xvfb-run -a` でラップすること（詳細は testing-rules.md Section 1 参照）。
+> **Linux / Remote-SSH**: `xvfb-run -a` でラップすること（詳細は `.cursor/rules/testing-rules.mdc` Section 1 参照）。
 
 特定のカテゴリやテストのみを実行したい場合:
 
@@ -48,7 +49,7 @@ disable-model-invocation: true
 
 ## 4. Fix Loop
 
-テストが失敗した場合は、testing-rules.md Section 3「エラー修正フロー」に従い修正する。
+テストが失敗した場合は、`.cursor/rules/testing-rules.mdc` Section 3「エラー修正フロー」に従い修正する。
 
 1. エラーログを確認し原因を特定
 2. コードを修正

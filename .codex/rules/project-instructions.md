@@ -1,0 +1,217 @@
+
+# プロジェクト共通指示書
+
+## 技術スタック (想定)
+- 言語: Go
+- アーキテクチャ: Modular/Layered Architecture
+
+## ディレクトリ構造と情報源
+- **仕様・設計**: `prompts/phases/` 配下が「正」の情報源です。
+    - `000-xxx`: フェーズ名称
+        - `branches/`: ブランチ別のアイデアと計画
+            - `main/`: `main`ブランチ (現在の作業ブランチ名を入れること)
+                - `ideas/`: 主要なアイデアメモと仕様書
+                    - `000-yyy.md`: アイディアと要件を記したマークダウンファイル
+                    - `001-zzz.md`: 同上
+                - `plans/`: 実装計画書
+
+## 開発プロセス
+
+- **仕様ファースト**
+    - 実装の前に `prompts/phases/...` 以下の `branches/` > 作業ブランチ名 > `ideas/` フォルダに仕様を作成・更新してください。仕様書のファイル名は、`000-` から始まる3桁の連番の数字で管理してください。
+
+## ワークフロー間の流れ
+
+procedure（ワークフロー）は、以下の順序で連携して動作します:
+
+### 1. 仕様書作成フェーズ
+**ワークフロー**: `.codex/skills/create-specification/SKILL.md`
+
+1. **人間**: 実装のアイディアを考える
+2. **AI**: `.codex/skills/create-specification/SKILL.md` を使って仕様のマークダウンファイルを生成
+   - 出力先: `prompts/phases/000-xxx/branches/[ブランチ名]/ideas/XXX-Name.md`
+   - 内容: 背景、要件、実装計画の概要
+3. **人間**: 仕様書をレビュー
+   - 修正が必要な場合は、AIに指示して修正させる
+   - 問題なければ、**明示的に次のフェーズへ進むよう指示する**（勝手に進まないこと）
+
+### 2. 実装計画作成フェーズ
+**ワークフロー**: `.codex/skills/create-implementation-plan/SKILL.md`
+
+1. **人間**: 仕様マークダウンファイルを指定
+2. **AI**: `.codex/skills/create-implementation-plan/SKILL.md` を使って詳細な実装計画を作成
+   - 入力: `prompts/phases/000-xxx/branches/[ブランチ名]/ideas/XXX-Name.md`
+   - 出力: `prompts/phases/000-xxx/branches/[ブランチ名]/plans/YYY-Name.md`
+   - 内容: 統合テスト計画、単体テスト計画、実装手順、検証計画
+   - 大きな仕様の場合: 複数の実装計画ファイルに分割（Part1, Part2, ...）
+3. **人間**: 実装計画をレビュー
+   - 修正が必要な場合は、AIに指示して修正させる
+   - 問題なければ、**明示的に次のフェーズへ進むよう指示する**（勝手に進まないこと）
+
+### 3. 実装実行フェーズ
+**ワークフロー**: `.codex/skills/execute-implementation-plan/SKILL.md`
+
+1. **人間**: 実装計画ファイルを指定
+2. **AI**: `.codex/skills/execute-implementation-plan/SKILL.md` に従って実装を実行
+   - 入力: `prompts/phases/000-xxx/branches/[ブランチ名]/plans/YYY-Name.md`
+   - プロセス:
+     - コーディングルール (`.codex/rules/coding-rules.md`) を遵守してコード実装
+     - テストルール (`.codex/rules/testing-rules.md`) を遵守してテスト作成
+     - 実装計画のチェックボックス `[ ]` → `[x]` で進捗管理
+     - 進行中項目は `[/]` でマーク
+
+### 4. ビルド・検証フェーズ
+**ワークフロー**: `.codex/skills/build-pipeline/SKILL.md`
+
+実装実行フェーズ内で自動的に使用されます:
+
+1. **AI**: `scripts/process/build.sh` を実行
+   - 全体ビルドと単体テストを実行
+   - 失敗時は即座に修正して再実行
+2. **AI**: `scripts/process/integration_test.sh` を実行
+   - 統合テストを実行
+   - **Linux** および **Remote-SSH の接続先が Linux** のときは **headless 前提**とする: E2E テストに **`--headed` と `--ui` を付けない**（Playwright の headless 既定のまま）。
+   - 失敗時は修正して該当テストのみ再実行 (`--specify` オプション使用)
+3. **AI**: 必要に応じて全テストを再実行してリグレッション確認
+
+### 5. 確かめと次の仕様のフェーズ
+**ワークフロー**: `.codex/skills/verify-and-specify-next/SKILL.md`
+
+1. **人間**: 実装の確認の報告（`.codex/skills/create-reproducible-report/SKILL.md` の `_runs/procedures/`（gitignore）の再現手順の報告、E2E の記録、調査の報告など）を指定
+2. **AI**: `.codex/skills/verify-and-specify-next/SKILL.md` に従って、元の仕様と報告を熟読し、自分で確かめる
+   - 問題があれば、直しの仕様を `.codex/skills/create-specification/SKILL.md` で作成
+   - 問題が無ければ、次に実装すべきものを提案し、その仕様を `.codex/skills/create-specification/SKILL.md` で作成
+3. **人間**: 仕様書をレビュー（以降は仕様書作成フェーズと同じ）
+
+### 調査ワークフロー（開発フローとは独立）
+**ワークフロー**: `.codex/skills/investigate/SKILL.md`
+
+開発フロー（仕様 → 計画 → 実装）とは独立した、**読み取り専用**の調査ワークフローです。
+
+1. **人間**: 調査内容を依頼（バグ調査、設計理解、依存関係の把握など）
+2. **AI**: `.codex/skills/investigate/SKILL.md` に従って調査を実施
+   - コードの閲覧・検索、ログ分析、Gitの履歴追跡など
+   - 必要に応じて既存コマンドの実行による現状把握
+   - **コードの変更は一切行わない**
+3. **AI**: 調査結果をArtifactレポートとしてまとめて報告
+4. **人間**: レポートを確認し、必要に応じて追加調査を依頼
+   - 修正が必要な場合は、別途 `/create-specification` から開発フローを開始
+
+### ワークフロー図
+
+```
+=== 開発フロー ===
+
+[人間: アイディア]
+       ↓
+[AI: .codex/skills/create-specification/SKILL.md] → 仕様書生成
+       ↓
+[人間: レビュー・修正・進行指示]
+       ↓
+[AI: .codex/skills/create-implementation-plan/SKILL.md] → 実装計画生成
+       ↓
+[人間: レビュー・修正・進行指示]
+       ↓
+[AI: .codex/skills/execute-implementation-plan/SKILL.md]
+       ├→ コーディング
+       ├→ テスト作成
+       └→ [AI: .codex/skills/build-pipeline/SKILL.md]
+              ├→ scripts/process/build.sh (全体ビルド・単体テスト)
+              └→ scripts/process/integration_test.sh (統合テスト)
+       ↓
+[AI: .codex/skills/create-reproducible-report/SKILL.md] → 再現手順の報告
+       ↓
+[AI: .codex/skills/verify-and-specify-next/SKILL.md] → 確かめて、直しの仕様か次の仕様を生成
+       ↓
+[人間: レビュー・修正・進行指示] → 実装計画生成へ
+
+=== 調査フロー（独立・読み取り専用）===
+
+[人間: 調査依頼]
+       ↓
+[AI: .codex/skills/investigate/SKILL.md] → コード解析・ログ分析・コマンド実行
+       ↓
+[AI: レポート作成] → Artifact として報告
+       ↓
+[人間: レポート確認・追加調査依頼]
+       └→ 修正が必要な場合は開発フローへ
+```
+
+### 重要なポイント
+
+- **人間のレビューポイント**: 仕様書と実装計画の2箇所
+- **自動実行部分**: 実装実行とビルド・検証パイプライン
+- **進捗管理**: 実装計画のチェックボックスで進捗を可視化
+- **テスト順序**: 単体テスト → 統合テスト → その他のテスト
+- **スクリプト配置**: `scripts/` ディレクトリに各種ビルド・テストスクリプトを配置
+- **フェーズ移行の禁止事項**: 現在のワークフローが完了しても、人間からの明示的な指示があるまでは、勝手に次のワークフロー（フェーズ）を開始してはいけません。
+- **システム自動承認（Proceed to execution）メッセージに関する注意事項**:
+  - 実装計画書などの成果物を書き出した際、Antigravity環境の仕組み（Stop Hook）により、システム側から `stop hook blocked... The user has automatically approved... Proceed to execution` と自動承認のシグナルが注入されることがあります。
+  - これはAntigravityシステム内部のアーティファクト管理上の自動承認であり、**人間が管理する `ideas/` や `plans/` 下の成果物そのものを人間が承認したという意味ではありません。**
+  - したがって、この自動承認システムメッセージを受信した場合であっても、**チャット上で人間から直接「計画を承認する」「実装へ進んでください」といった明示的な意思表示があるまでは、絶対に次のフェーズ（実装の実行やコードの変更、ビルド）を開始してはいけません。**
+
+## シェル環境の指定
+
+コマンドラインでスクリプトやコマンドを実行する際は、**bash** の使用を推奨します。
+**Powershellは使わないで**ください。
+
+### Windows環境での注意事項
+
+> [!IMPORTANT]
+> Windows環境では、PowerShellではなく必ず **Git Bash** のbash互換環境を使用してください。
+
+- **推奨環境**: Git Bash, WSL (Windows Subsystem for Linux), Cygwin など
+- **理由**: プロジェクトのスクリプト (`scripts/` 配下) はbashスクリプトとして記述されているため、PowerShellでは正しく動作しない可能性があります
+- **確認方法**: ターミナルで `bash --version` を実行して、bashが利用可能か確認してください
+
+### Mac / Linux環境
+
+- 標準のbashシェルを使用してください
+- **Linux / Remote-SSH（Linux）**: E2E テストに **`--headed` / `--ui` を付けない**（headless で実行する）
+
+## Git 操作ルール
+
+実装フェーズ（`execute-implementation-plan` や `build-pipeline`、`run-all-tests`）では、以下のルールに従って Git 操作を行ってください。
+
+> [!IMPORTANT]
+> **コミットメッセージのクォーティング**: Windows 環境では、PowerShell 経由で bash を呼び出す際にコミットメッセージが途切れる問題があります。
+> **必ず `-m` の引数にはシングルクォートを使用**してください（例: `git commit -m 'feat: add feature'`）。
+> Mac / Linux 環境ではこの問題は発生しませんが、統一のためシングルクォートの使用を推奨します。
+
+### コミットの方針
+
+- **こまめにコミット**: コードの変更は、目的や意味のある単位で `git add` → `git commit` を実施してください。大きな変更を一度にまとめてコミットすることは避けてください。
+- **コミット単位の目安**:
+    - 1つの関数/メソッドの実装完了
+    - 1つのテストファイルの作成・修正完了
+    - 1つのバグ修正完了
+    - リファクタリングの1ステップ完了
+    - 設定ファイルの変更
+- **コミットメッセージ**: 変更内容が分かる簡潔なメッセージを英語で記述してください。
+    - 例: `feat: add bearer auth middleware`, `test: add unit tests for token validation`, `fix: handle nil pointer in auth handler`
+- **コミットのタイミング**: 実装計画の各ステップを完了するごとに、対応する変更をコミットしてください。
+
+### プッシュの方針
+
+- **ビルド・テスト完了後にプッシュ**: `build.sh` および必要な統合テストが全て成功した時点で `git push` を実施してください。
+- テストが失敗している状態ではプッシュしないでください。
+- 修正ループ（Fix Loop）中のコミットは、テストが全て通過してからまとめてプッシュします。
+
+### 実行例
+
+```bash
+# 実装の各ステップ完了時
+git add <変更ファイル>
+git commit -m 'feat: implement rate limiter struct'
+
+# ビルド・テスト全成功後
+git push
+```
+
+## ファイル管理規則
+- **中間生成ファイル**: タスク進行中に生成される中間ファイル（ビルドエラーログ、デバッグ出力、一時的なドキュメントなど）は、必ず `tmp/` ディレクトリ以下に作成してください。
+    - 例: `build_error.txt`, `doc_delta.txt`, `doc_resp.txt` などは `tmp/build_error.txt`, `tmp/doc_delta.txt`, `tmp/doc_resp.txt` として作成
+    - ログファイル、PIDファイルなども同様に `tmp/` 以下に配置すること（例: `tmp/e2e_run.log`, `tmp/server.pid`）。
+    - これらのファイルはプロセスでは必要ですが、タスク完了後はゴミとなり、誤ってコミットされるリスクがあります。
+    - `tmp/` ディレクトリは `.gitignore` で除外されているため、コミットされません。
+- **ファイルパスの表示**: ファイルを開かせる・クリックさせる提示では、ワークスペース相対の Markdown リンクを使うこと（例: `[path/to/file.md](path/to/file.md)`）。`file://` や絶対パスは付けないこと（`.codex/skills/portable-file-references/SKILL.md`）。

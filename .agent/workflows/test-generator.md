@@ -1,6 +1,9 @@
 ---
-description: 仕様書の要件から実現性確認のためのテスト実装計画を作成する
+name: test-generator
+description: Generate test implementation plans based on specifications and existing test infrastructure.
+disable-model-invocation: false
 ---
+
 
 # テスト実装計画作成ワークフロー
 
@@ -13,7 +16,7 @@ description: 仕様書の要件から実現性確認のためのテスト実装�
 1.  **入力ファイルの特定**:
     *   ユーザーが指定したファイル、または現在エディタで開いているファイルを「仕様書」として扱う。
 2.  **ルールの読み込み**:
-    *   `prompts/rules/testing-rules.md` を読み込む。
+    *   `.agent/rules/testing-rules.md` を読み込む。
 3.  **ステータスの取得**:
     *   `scripts/utils/show_current_status.sh` を実行し、`phase`, `branch`, `next_plan_id` を取得する。
 
@@ -64,7 +67,7 @@ description: 仕様書の要件から実現性確認のためのテスト実装�
 ## 8. テストシナリオへの変換
 
 確認手順をテスト種別に分類し、実装計画としてまとめる。
-テスト種別の配置先やファイル命名規則は `prompts/rules/testing-rules.md` Section 4 を参照。
+テスト種別の配置先やファイル命名規則は `.agent/rules/testing-rules.md` Section 4 を参照。
 
 テストケースの記述形式:
 
@@ -173,7 +176,7 @@ description: 仕様書の要件から実現性確認のためのテスト実装�
 ## 5. Verification Plan
 
 ビルドとテスト実行の手順。
-テスト実行コマンドの詳細は `prompts/rules/testing-rules.md` Section 1 を参照。
+テスト実行コマンドの詳細は `.agent/rules/testing-rules.md` Section 1 を参照。
 
 1.  **Build & Unit Tests**: `./scripts/process/build.sh`
 2.  **統合テスト**: `./scripts/process/integration_test.sh --categories "[category]" --specify "[対象]"`

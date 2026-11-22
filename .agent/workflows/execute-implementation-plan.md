@@ -1,6 +1,9 @@
 ---
-description: 実装計画(Implementation Plan)に基づいてコードを実装・テストする
+name: execute-implementation-plan
+description: Execute an approved implementation plan following TDD workflow with incremental commits and verification.
+disable-model-invocation: false
 ---
+
 
 # 実装実行ワークフロー
 
@@ -11,9 +14,9 @@ description: 実装計画(Implementation Plan)に基づいてコードを実装�
 1.  **入力ファイルの特定**:
     *   ユーザーが指定したファイル、または現在エディタで開いているファイルを「実装計画書」として扱う。
 2.  **ルールの読み込み**:
-    *   `prompts/rules/coding-rules.md` (コーディングルール)
-    *   `prompts/rules/testing-rules.md` (テスト実施ルール)
-    *   `prompts/rules/logging-rules.md` (ログ記述ルール)
+    *   `.agent/rules/coding-rules.md` (コーディングルール)
+    *   `.agent/rules/testing-rules.md` (テスト実施ルール)
+    *   `.agent/rules/logging-rules.md` (ログ記述ルール)
 
 ## 2. 実装の実行
 
@@ -24,8 +27,8 @@ description: 実装計画(Implementation Plan)に基づいてコードを実装�
     *   `[ ]` → `[/]` (進行中) → `[x]` (完了) でチェックボックスを更新する。
 3.  **コーディング**:
     *   計画書の手順に従ってコードを記述・修正する。
-    *   `prompts/rules/coding-rules.md` のスタイルや設計原則を厳守する。
-    *   `prompts/rules/logging-rules.md` のレベル基準に従い、DEBUG ログを積極的に挿入する。
+    *   `.agent/rules/coding-rules.md` のスタイルや設計原則を厳守する。
+    *   `.agent/rules/logging-rules.md` のレベル基準に従い、DEBUG ログを積極的に挿入する。
 4.  **こまめな Git コミット**:
     *   各ステップ完了ごとに `git add` → `git commit` を実施する。
     *   コミットルールの詳細は `instructions.md` の「Git 操作ルール」を参照。
@@ -47,7 +50,7 @@ description: 実装計画(Implementation Plan)に基づいてコードを実装�
 
 ## 3. テストと検証
 
-テスト実施の詳細ルール（実行順序、修正ループ、タイムアウト方針等）は `prompts/rules/testing-rules.md` を参照。
+テスト実施の詳細ルール（実行順序、修正ループ、タイムアウト方針等）は `.agent/rules/testing-rules.md` を参照。
 
 ### 3.1 テスト実施の順序
 
@@ -64,8 +67,21 @@ description: 実装計画(Implementation Plan)に基づいてコードを実装�
 > [!CAUTION]
 > **NEVER IGNORE FAILURES**: ビルドやテストの失敗を無視してタスクを完了させることは禁止。
 
-修正ループの詳細手順は `prompts/rules/testing-rules.md` Section 3 を参照。
+修正ループの詳細手順は `.agent/rules/testing-rules.md` Section 3 を参照。
 「後で直す」は禁止。その場で修正し、コミットする。
+
+
+### 3.3 遠方知識の記録 (Far-Knowledge Recording)
+
+> [!CAUTION]
+> **省略禁止**: git push の前に、このステップを**必ず**実行してください。
+> 遠方知識に該当する変更がない場合でも、判定プロセスは実行し、
+> 「no update」の報告を出してから次に進んでください。
+
+全てのビルドとテストが成功し、コミットが完了した後、git push の**前に**、
+**record-far-knowledge** スキルに従って遠方知識の記録を行ってください。
+
+体系化・スキル化は別途 **systematize-far-knowledge** ワークフローで実施します。
 
 ## 4. Git Push
 

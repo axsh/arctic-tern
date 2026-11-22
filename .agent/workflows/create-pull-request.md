@@ -1,6 +1,9 @@
 ---
-description: GitのコミットからPRの作成、およびPRマージ後の追加改修運用までをカバーするワークフロー
+name: create-pull-request
+description: Create a pull request from committed code changes and manage post-merge revisions.
+disable-model-invocation: false
 ---
+
 
 # PR作成ワークフロー (Create Pull Request Workflow)
 
@@ -22,7 +25,7 @@ description: GitのコミットからPRの作成、およびPRマージ後の追
 
 3. **コミットの実行**:
    コミットメッセージはプロジェクトの規則（英語）に従って記述します。
-   **注意**: シェルからコマンドを実行する際、コミットメッセージ内のクォーテーション(`"`や`'`)、バッククォート(`` ` ``)、バックスラッシュ(`\`)、ドル記号(`$`) などのエスケープ処理に細心の注意を払ってください。途中で文字列が途切れないように適切にエスケープするか、複雑なメッセージの場合は一時ファイル(`tmp/commit_msg.txt`)に書き出してから `git commit -F tmp/commit_msg.txt` を使用することを推奨します。
+   **注意**: シェルからコマンドを実行する際、コミットメッセージ内のクォーテーション(`"`や`'`)、バッククォート(``` ` ```)、バックスラッシュ(`\`)、ドル記号(`$`) などのエスケープ処理に細心の注意を払ってください。途中で文字列が途切れないように適切にエスケープするか、複雑なメッセージの場合は一時ファイル(`tmp/commit_msg.txt`)に書き出してから `git commit -F tmp/commit_msg.txt` を使用することを推奨します。
    ```bash
    git commit -m "feat: add user authentication flow"
    ```

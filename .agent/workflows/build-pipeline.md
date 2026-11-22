@@ -1,6 +1,9 @@
 ---
-description: Build, Test, and Verify Pipeline
+name: build-pipeline
+description: Run the full build, unit test, and integration test pipeline to verify code changes.
+disable-model-invocation: false
 ---
+
 
 # Build and Verification Workflow
 
@@ -8,7 +11,7 @@ description: Build, Test, and Verify Pipeline
 
 > [!IMPORTANT]
 > テスト実行の詳細ルール（Linux/Remote-SSH 対応、エラー修正フロー、タイムアウト方針等）は
-> `prompts/rules/testing-rules.md` を参照すること。
+> `.agent/rules/testing-rules.md` を参照すること。
 
 ## 1. Full Build & Unit Test
 
@@ -18,7 +21,7 @@ description: Build, Test, and Verify Pipeline
 // turbo
 ./scripts/process/build.sh
 
-> **Linux / Remote-SSH**: `./scripts/process/build.sh --skip-etc` を使うこと（詳細は testing-rules.md Section 1 参照）。
+> **Linux / Remote-SSH**: `./scripts/process/build.sh --skip-etc` を使うこと（詳細は `.agent/rules/testing-rules.md` Section 1 参照）。
 
 ## 2. Environment Setup
 
@@ -34,7 +37,7 @@ description: Build, Test, and Verify Pipeline
 // turbo
 ./scripts/process/integration_test.sh
 
-> **Linux / Remote-SSH**: `xvfb-run -a` でラップすること（詳細は testing-rules.md Section 1 参照）。
+> **Linux / Remote-SSH**: `xvfb-run -a` でラップすること（詳細は `.agent/rules/testing-rules.md` Section 1 参照）。
 
 特定のカテゴリやテストのみを実行したい場合:
 
@@ -46,7 +49,7 @@ description: Build, Test, and Verify Pipeline
 
 ## 4. Fix Loop
 
-テストが失敗した場合は、testing-rules.md Section 3「エラー修正フロー」に従い修正する。
+テストが失敗した場合は、`.agent/rules/testing-rules.md` Section 3「エラー修正フロー」に従い修正する。
 
 1. エラーログを確認し原因を特定
 2. コードを修正

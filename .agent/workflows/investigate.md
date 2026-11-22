@@ -1,6 +1,9 @@
 ---
-description: コードベースの調査・分析を行い、レポートとしてまとめる。コード変更は行わない読み取り専用のワークフロー。
+name: investigate
+description: Investigate a codebase, bug, or technical question and produce a structured investigation report.
+disable-model-invocation: false
 ---
+
 
 # 調査ワークフロー (Investigation)
 

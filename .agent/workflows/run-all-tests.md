@@ -1,6 +1,9 @@
 ---
-description: >-
-  全ビルド実行後、選択的実行プランを作成して統合テスト/E2Eテストを順次実行し、
+name: run-all-tests
+description: Run all project tests including build, unit, integration, and E2E tests with a repair loop for failures.
+disable-model-invocation: false
+---
+
   失敗を調査して修正するループを回す。
   「全テストを実行して」「プロジェクト全体を検証して」「テスト失敗を修正して」と
   ユーザーが依頼した場合に使用する。
@@ -12,7 +15,7 @@ description: >-
 
 > [!IMPORTANT]
 > テスト実行の詳細ルール（Linux/Remote-SSH 対応、エラー修正フロー、タイムアウト方針等）は
-> `prompts/rules/testing-rules.md` を参照すること。
+> `.agent/rules/testing-rules.md` を参照すること。
 
 ---
 
