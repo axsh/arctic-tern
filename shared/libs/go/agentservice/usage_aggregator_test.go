@@ -1,10 +1,38 @@
 package agentservice
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/axsh/arctic-tern/shared/libs/go/codingagent"
 )
+
+func TestTurnUsageAggregator_ConcurrentObserveAndMerge(t *testing.T) {
+	a := newTurnUsageAggregator("t1")
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				a.Observe(codingagent.StreamEvent{Type: codingagent.EventText,
+					Usage: &codingagent.TokenUsage{CallID: fmt.Sprintf("o-%d-%d", i, j), InputTokens: 1}})
+			}
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				a.MergeCalls([]codingagent.TokenUsage{{CallID: fmt.Sprintf("m-%d-%d", i, j), InputTokens: 1}})
+			}
+		}(i)
+	}
+	wg.Wait()
+	rec, ok := a.Finalize()
+	if !ok || len(rec.Calls) != 3200 {
+		t.Fatalf("ok=%v calls=%d, want 3200", ok, len(rec.Calls))
+	}
+}
 
 func TestTurnUsageAggregator_DedupAndPreferResult(t *testing.T) {
 	a := newTurnUsageAggregator("turn-1")

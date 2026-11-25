@@ -2,18 +2,20 @@ package agentservice
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/axsh/arctic-tern/shared/libs/go/codingagent"
 )
 
 type turnUsageAggregator struct {
-	turnID     string
-	calls      []codingagent.TokenUsage
-	seenCall   map[string]struct{}
-	turn       *codingagent.TokenUsage
-	finalized  bool
-	finalRec   codingagent.TurnUsageRecord
-	finalOK    bool
+	mu        sync.Mutex
+	turnID    string
+	calls     []codingagent.TokenUsage
+	seenCall  map[string]struct{}
+	turn      *codingagent.TokenUsage
+	finalized bool
+	finalRec  codingagent.TurnUsageRecord
+	finalOK   bool
 }
 
 func newTurnUsageAggregator(turnID string) *turnUsageAggregator {
@@ -27,6 +29,8 @@ func (a *turnUsageAggregator) Observe(ev codingagent.StreamEvent) {
 	if a == nil || ev.Usage == nil {
 		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	u := *ev.Usage
 	if u.CallID != "" {
 		if _, ok := a.seenCall[u.CallID]; ok {
@@ -61,6 +65,8 @@ func (a *turnUsageAggregator) Observe(ev codingagent.StreamEvent) {
 }
 
 func (a *turnUsageAggregator) MergeCalls(extra []codingagent.TokenUsage) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	for i, u := range extra {
 		id := u.CallID
 		if id == "" {
@@ -79,6 +85,8 @@ func (a *turnUsageAggregator) Finalize() (codingagent.TurnUsageRecord, bool) {
 	if a == nil {
 		return codingagent.TurnUsageRecord{}, false
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if a.finalized {
 		return a.finalRec, a.finalOK
 	}

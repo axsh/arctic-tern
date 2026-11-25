@@ -64,6 +64,13 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Serialize with turn-changing requests; act on the state once the gate is free.
+	unlock := s.turnGates.Lock(id)
+	defer unlock()
+	if latest, err := s.sessions.Get(id); err == nil {
+		record = latest
+	}
+
 	if exec, ok := s.execRegistry.Get(id); ok {
 		writeSessionBusy(w, exec.status)
 		return
@@ -347,11 +354,16 @@ func (s *Server) ingestActiveTurn(sessionID string) {
 	if !ok || exec == nil || exec.relay == nil {
 		return
 	}
+	s.ingestTurnEvents(sessionID, exec.relay.snapshot())
+}
+
+// ingestTurnEvents appends a turn's assistant/tool facts to canonical history and
+// refreshes the session's native resume id from the binding.
+func (s *Server) ingestTurnEvents(sessionID string, events []codingagent.StreamEvent) {
 	rec, err := s.sessions.Get(sessionID)
 	if err != nil || rec == nil || rec.SessionDir == "" {
 		return
 	}
-	events := exec.relay.snapshot()
 	if err := IngestTurn(rec.SessionDir, rec.AgentName, rec.AgentSessionID, events); err != nil {
 		if s.logger != nil {
 			s.logger.Error("failed to ingest turn into canonical history",

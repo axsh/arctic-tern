@@ -29,6 +29,90 @@ func TestExecRegistry_SetStatus(t *testing.T) {
 	}
 }
 
+func TestExecRegistry_UnregisterIfOnlyRemovesSameExecution(t *testing.T) {
+	reg := newExecRegistry()
+	a := &activeExecution{sessionID: "s1"}
+	b := &activeExecution{sessionID: "s1"}
+	if err := reg.Register("s1", a); err != nil {
+		t.Fatal(err)
+	}
+	if reg.UnregisterIf("s1", b) {
+		t.Fatal("UnregisterIf removed a different execution")
+	}
+	if _, ok := reg.Get("s1"); !ok {
+		t.Fatal("a should still be registered")
+	}
+	if !reg.UnregisterIf("s1", a) {
+		t.Fatal("UnregisterIf should remove the same execution")
+	}
+	if _, ok := reg.Get("s1"); ok {
+		t.Fatal("a should be gone after UnregisterIf")
+	}
+}
+
+func TestActiveExecution_MarkStoppedOnce(t *testing.T) {
+	e := &activeExecution{sessionID: "s1"}
+	if !e.markStopped(stopReasonInterrupted) {
+		t.Fatal("first markStopped should return true")
+	}
+	if e.markStopped(stopReasonCancelled) {
+		t.Fatal("second markStopped should return false")
+	}
+	if e.stoppedReason() != stopReasonInterrupted {
+		t.Fatalf("stoppedReason = %q, want interrupted", e.stoppedReason())
+	}
+	if !e.isStopped() {
+		t.Fatal("isStopped should be true")
+	}
+	var nilExec *activeExecution
+	if nilExec.isStopped() {
+		t.Fatal("nil exec isStopped should be false")
+	}
+}
+
+func TestActiveExecution_SuppressesSessionWrites(t *testing.T) {
+	tests := []struct {
+		reason string
+		want   bool
+	}{
+		{"", false},
+		{stopReasonCancelled, true},
+		{stopReasonInterrupted, true},
+		{stopReasonTerminated, true},
+		{stopReasonDrainTimeout, false},
+	}
+	for _, tt := range tests {
+		e := &activeExecution{sessionID: "s1"}
+		if tt.reason != "" {
+			e.markStopped(tt.reason)
+		}
+		if got := e.suppressesSessionWrites(); got != tt.want {
+			t.Errorf("reason %q: suppressesSessionWrites = %v, want %v", tt.reason, got, tt.want)
+		}
+	}
+}
+
+func TestPrependEvents_YieldsPreambleThenSource(t *testing.T) {
+	src := make(chan codingagent.StreamEvent, 3)
+	src <- codingagent.StreamEvent{Type: codingagent.EventText, Content: "a"}
+	src <- codingagent.StreamEvent{Type: codingagent.EventResult}
+	close(src)
+	out := prependEvents(src, codingagent.StreamEvent{Type: codingagent.EventSystem, Content: "p"})
+	var got []codingagent.StreamEvent
+	for ev := range out {
+		got = append(got, ev)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d events, want 3", len(got))
+	}
+	if got[0].Type != codingagent.EventSystem || got[0].Content != "p" {
+		t.Fatalf("first event = %+v, want preamble", got[0])
+	}
+	if got[1].Content != "a" || got[2].Type != codingagent.EventResult {
+		t.Fatalf("source events not forwarded in order: %+v", got)
+	}
+}
+
 func TestEventRelay_IsSourceDone(t *testing.T) {
 	ch := make(chan codingagent.StreamEvent)
 	relay := newEventRelay(ch)

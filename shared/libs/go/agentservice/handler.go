@@ -270,6 +270,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+	s.turnGates.Forget(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -295,6 +296,15 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Backfill empty model for sessions created before gateway default application.
 	s.applySessionModelDefault(record)
+
+	// Serialize turn-changing requests; the gate is released once the turn is
+	// registered (via runTurnHooks.onRegistered) so cancel / PATCH / a second message
+	// do not wait for the turn to finish streaming.
+	release := s.turnGates.Lock(sessionID)
+	defer release()
+	if latest, err := s.sessions.Get(sessionID); err == nil {
+		record = latest
+	}
 
 	if exec, ok := s.execRegistry.Get(sessionID); ok {
 		writeSessionBusy(w, exec.status)
@@ -452,13 +462,50 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	execCtx, execCancel := context.WithCancel(context.Background())
 	s.RegisterExecCancel(sessionID, execCancel)
-	s.runTurn(r, w, execCtx, execCancel, record, sessionID, turnID, req.CorrelationID, promptText, rawUserPrompt, resumeID, opts, savedFiles)
+	s.runTurn(r, w, execCtx, execCancel, record, sessionID, turnID, req.CorrelationID, promptText, rawUserPrompt, resumeID, opts, savedFiles, runTurnHooks{onRegistered: release})
 }
 
-// finishActiveExecution closes the agent session and clears busy-state registries.
-func (s *Server) finishActiveExecution(sessionID string, agentSess codingagent.Session, savedFiles []string) {
-	if exec, ok := s.execRegistry.Get(sessionID); ok {
-		exec.stopReattachTimer()
+// finishExecution closes exec's agent session and releases the busy-state registries,
+// but only those that still belong to exec. A stopped execution leaves everything to
+// the API call that stopped it; a superseded one closes only its own agent session.
+func (s *Server) finishExecution(exec *activeExecution, sessionID string, agentSess codingagent.Session, savedFiles []string) {
+	cleanup := func() {
+		if len(savedFiles) > 0 {
+			CleanupMultimodalFiles(savedFiles)
+			if s.logger != nil {
+				s.logger.Debug("cleaned up multimodal temp files", "session_id", sessionID, "count", len(savedFiles))
+			}
+		}
+	}
+
+	// 1. A stopped exec: the API call that stopped it already closed and unregistered it
+	// (and, for Part 2 native hand-off, the agent session must stay alive).
+	if exec != nil && exec.isStopped() {
+		cleanup()
+		return
+	}
+
+	// 2/3. A superseded launch (exec replaced, or a pre-registration failure while another
+	// turn is registered): close only our own agent session; keep the successor's registries.
+	if exec != nil {
+		if cur, ok := s.execRegistry.Get(sessionID); ok && cur != exec {
+			if agentSess != nil {
+				_ = agentSess.Close()
+			}
+			cleanup()
+			return
+		}
+	} else if _, ok := s.execRegistry.Get(sessionID); ok {
+		if agentSess != nil {
+			_ = agentSess.Close()
+		}
+		cleanup()
+		return
+	}
+
+	// 4. Our own execution (or nothing registered): run the normal teardown.
+	if cur, ok := s.execRegistry.Get(sessionID); ok {
+		cur.stopReattachTimer()
 	}
 	s.ingestActiveTurn(sessionID)
 	if agentSess != nil {
@@ -466,13 +513,23 @@ func (s *Server) finishActiveExecution(sessionID string, agentSess codingagent.S
 	}
 	s.UnregisterActiveSession(sessionID)
 	s.UnregisterExecCancel(sessionID)
-	s.execRegistry.Unregister(sessionID)
-	if len(savedFiles) > 0 {
-		CleanupMultimodalFiles(savedFiles)
-		if s.logger != nil {
-			s.logger.Debug("cleaned up multimodal temp files", "session_id", sessionID, "count", len(savedFiles))
-		}
+	if exec != nil {
+		s.execRegistry.UnregisterIf(sessionID, exec)
+	} else {
+		s.execRegistry.Unregister(sessionID)
 	}
+	cleanup()
+}
+
+// writeJSONError writes {"error": msg, "hint": hint} (hint omitted when empty).
+func writeJSONError(w http.ResponseWriter, status int, msg, hint string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	body := map[string]any{"error": msg}
+	if hint != "" {
+		body["hint"] = hint
+	}
+	json.NewEncoder(w).Encode(body)
 }
 
 // toAgentLogEntry converts a StreamEvent to an AgentLogEntry for TaskLog.
@@ -598,6 +655,10 @@ func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := parts[0]
 
+	// Hold the turn gate across admission; release it before streaming resumes.
+	release := s.turnGates.Lock(sessionID)
+	defer release()
+
 	exec, ok := s.execRegistry.Get(sessionID)
 	if !ok {
 		http.Error(w, "no active execution", http.StatusConflict)
@@ -637,6 +698,8 @@ func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request) {
 	s.sessions.Update(record)
 	s.execRegistry.SetStatus(sessionID, codingagent.StatusActive)
 	exec.status = codingagent.StatusActive
+	// The turn is active again; do not hold the gate while streaming.
+	release()
 
 	if !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 		http.Error(w, "Accept: text/event-stream required", http.StatusNotAcceptable)
@@ -645,7 +708,7 @@ func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request) {
 
 	_, _ = s.streamSSERelay(r.Context(), w, exec, false)
 
-	s.finishActiveExecution(sessionID, exec.agentSess, nil)
+	s.finishExecution(exec, sessionID, exec.agentSess, nil)
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	if flusher, ok := w.(http.Flusher); ok {
@@ -839,32 +902,26 @@ func (s *Server) handleTerminate(w http.ResponseWriter, r *http.Request) {
 		s.logger.Debug("terminating session", "session_id", sessionID)
 	}
 
-	turnID := ""
-	correlationID := ""
+	unlock := s.turnGates.Lock(sessionID)
+	defer unlock()
+
 	if exec, ok := s.execRegistry.Get(sessionID); ok {
-		turnID = exec.turnID
-		correlationID = exec.correlationID
-	}
-
-	// Cancel the agent execution context.
-	s.CancelExecution(sessionID)
-
-	// Reconcile (including turn_files flush) while the exec relay is still registered.
-	if s.artifactStore != nil {
-		s.reconcileSessionArtifacts(r.Context(), sessionID, turnID, correlationID)
-	}
-
-	// Clear busy state so a subsequent SendMessage can start a new turn
-	// (e.g. after config_dir switch on the same session_id).
-	if exec, ok := s.execRegistry.Get(sessionID); ok {
-		if exec.agentSess != nil {
-			_ = exec.agentSess.Close()
+		// Stop the in-flight turn; the stopped exec writes nothing further, so the
+		// terminal "closed" status below is not overwritten.
+		s.stopInFlightTurn(r.Context(), exec, stopOptions{reason: stopReasonTerminated})
+	} else {
+		s.CancelExecution(sessionID)
+		if s.artifactStore != nil {
+			// Idle terminate keeps today's session-end reconcile.
+			s.reconcileSessionArtifacts(r.Context(), sessionID, "", "")
 		}
-		s.execRegistry.Unregister(sessionID)
+		s.UnregisterActiveSession(sessionID)
+		s.UnregisterExecCancel(sessionID)
 	}
-	s.UnregisterActiveSession(sessionID)
-	s.UnregisterExecCancel(sessionID)
 
+	if latest, err := s.sessions.Get(sessionID); err == nil {
+		record = latest
+	}
 	record.Status = codingagent.StatusClosed
 	s.sessions.Update(record)
 
@@ -905,33 +962,20 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		s.logger.Debug("cancelling in-flight turn", "session_id", sessionID)
 	}
 
-	turnID := ""
-	correlationID := ""
-	if exec, ok := s.execRegistry.Get(sessionID); ok {
-		turnID = exec.turnID
-		correlationID = exec.correlationID
-	}
-
-	s.CancelExecution(sessionID)
-
-	if s.artifactStore != nil {
-		s.reconcileSessionArtifacts(r.Context(), sessionID, turnID, correlationID)
-	}
+	unlock := s.turnGates.Lock(sessionID)
+	defer unlock()
 
 	if exec, ok := s.execRegistry.Get(sessionID); ok {
-		if exec.agentSess != nil {
-			_ = exec.agentSess.Close()
-		}
-		// Force relay subscribers (POST /messages SSE) to finish even if the
-		// agent process is slow to close its event channel after Cancel/Close.
-		if exec.relay != nil {
-			exec.relay.markSourceDone()
-		}
-		s.execRegistry.Unregister(sessionID)
+		// Stop the in-flight turn (cancel does not ingest partial facts into history).
+		s.stopInFlightTurn(r.Context(), exec, stopOptions{reason: stopReasonCancelled})
+	} else if s.artifactStore != nil {
+		// Idle cancel keeps today's reconcile.
+		s.reconcileSessionArtifacts(r.Context(), sessionID, "", "")
 	}
-	s.UnregisterActiveSession(sessionID)
-	s.UnregisterExecCancel(sessionID)
 
+	if latest, err := s.sessions.Get(sessionID); err == nil {
+		record = latest
+	}
 	// Keep session id; mark non-active without StatusClosed so resume remains possible.
 	record.Status = codingagent.StatusError
 	record.Error = turnCancelledError

@@ -200,6 +200,78 @@ func TestHandleCancel_KeepsSessionIDNonClosed(t *testing.T) {
 	}
 }
 
+func TestHandleCancel_DoesNotStartReplanTurnAndNextTurnCompletes(t *testing.T) {
+	agent := newTurnScriptAgent(func(turn int) bool { return turn == 1 })
+	_, ts := newScriptServer(t, agent)
+	sessionID, _ := createScriptSession(t, ts)
+
+	msgBody := map[string]any{"content": []map[string]string{{"type": "text", "text": "run long tool"}}}
+	oldSSE := startSSE(t, ts, "/api/v1/sessions/"+sessionID+"/messages", msgBody)
+	oldSSE.waitFor(t, func(ev map[string]any) bool { return ev["type"] == "tool_use" }, 3*time.Second)
+
+	status, body := postJSON(t, ts, "/api/v1/sessions/"+sessionID+"/cancel", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", status, body)
+	}
+	if !strings.Contains(string(body), "cancelled") {
+		t.Fatalf("cancel body=%s", body)
+	}
+
+	oldSSE.waitDone(t, 3*time.Second)
+
+	info := getSessionInfo(t, ts, sessionID)
+	if info["status"] != codingagent.StatusError {
+		t.Fatalf("status = %v, want error after cancel", info["status"])
+	}
+	if errStr, _ := info["error"].(string); errStr != "turn cancelled" {
+		t.Fatalf("error = %q, want turn cancelled", errStr)
+	}
+	if followable, _ := info["followable"].(bool); followable {
+		t.Fatal("session still followable after cancel")
+	}
+	if got := agent.creates.Load(); got != 1 {
+		t.Fatalf("creates = %d, want 1 (cancel must not start a replan turn)", got)
+	}
+
+	nextSSE := startSSE(t, ts, "/api/v1/sessions/"+sessionID+"/messages",
+		map[string]any{"content": []map[string]string{{"type": "text", "text": "second turn"}}})
+	nextSSE.waitFor(t, func(ev map[string]any) bool { return ev["type"] == "result" }, 3*time.Second)
+	nextSSE.waitDone(t, 3*time.Second)
+
+	info = getSessionInfo(t, ts, sessionID)
+	if info["status"] != codingagent.StatusCompleted {
+		t.Fatalf("status = %v, want completed after next turn", info["status"])
+	}
+	if errStr, _ := info["error"].(string); errStr != "" {
+		t.Fatalf("error = %q, want empty after next turn", errStr)
+	}
+}
+
+func TestHandleTerminate_InFlightTurnStaysClosed(t *testing.T) {
+	agent := newTurnScriptAgent(func(turn int) bool { return turn == 1 })
+	_, ts := newScriptServer(t, agent)
+	sessionID, _ := createScriptSession(t, ts)
+
+	msgBody := map[string]any{"content": []map[string]string{{"type": "text", "text": "run long tool"}}}
+	oldSSE := startSSE(t, ts, "/api/v1/sessions/"+sessionID+"/messages", msgBody)
+	oldSSE.waitFor(t, func(ev map[string]any) bool { return ev["type"] == "tool_use" }, 3*time.Second)
+
+	status, body := postJSON(t, ts, "/api/v1/sessions/"+sessionID+"/terminate", nil, "")
+	if status != http.StatusOK {
+		t.Fatalf("terminate status=%d body=%s", status, body)
+	}
+
+	oldSSE.waitDone(t, 3*time.Second)
+
+	info := getSessionInfo(t, ts, sessionID)
+	if info["status"] != codingagent.StatusClosed {
+		t.Fatalf("status = %v, want closed after the old stream finished", info["status"])
+	}
+	if got := agent.closes.Load(); got != 1 {
+		t.Fatalf("closes = %d, want 1", got)
+	}
+}
+
 func TestHandleCancel_DoesNotCloseLikeTerminate(t *testing.T) {
 	_, handler := newTestServer()
 	body, _ := json.Marshal(map[string]string{

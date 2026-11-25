@@ -52,6 +52,7 @@ type Server struct {
 	execCancelMu      sync.Mutex
 	execCancels       map[string]context.CancelFunc // sessionID -> execution cancel
 	execRegistry      *execRegistry
+	turnGates         turnGates // zero-value ready; serializes turn-changing requests per session
 	enabledVersions   map[int]bool // API versions to register
 	disableSandbox    bool
 	enableSubagent    bool

@@ -120,6 +120,9 @@ func (s *Server) markSessionActive(sessionID string) {
 		return
 	}
 	rec.Status = codingagent.StatusActive
+	// Clear a prior turn's cancel/interrupt marker or failure reason; it is not the
+	// state of this new turn.
+	rec.Error = ""
 	if err := s.sessions.Update(rec); err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to set session status active", "session_id", sessionID, "error", err)
@@ -140,6 +143,8 @@ func (s *Server) stopExecOnDrainTimeout(sessionID string, exec *activeExecution)
 			}
 			return streamTerminal{}
 		}
+		// Record the stop reason (keeps today's late status write; see suppressesSessionWrites).
+		exec.markStopped(stopReasonDrainTimeout)
 	}
 	if s.logger != nil {
 		s.logger.Warn(logSSEDrainTimedOut,
@@ -157,7 +162,11 @@ func (s *Server) stopExecOnDrainTimeout(sessionID string, exec *activeExecution)
 			_ = exec.agentSess.Close()
 		}
 	}
-	s.execRegistry.Unregister(sessionID)
+	if exec != nil {
+		s.execRegistry.UnregisterIf(sessionID, exec)
+	} else {
+		s.execRegistry.Unregister(sessionID)
+	}
 	s.UnregisterActiveSession(sessionID)
 	s.UnregisterExecCancel(sessionID)
 	return streamTerminal{
@@ -193,6 +202,12 @@ func (s *Server) writeSSEDone(w http.ResponseWriter) {
 	}
 }
 
+// runTurnHooks lets the caller of runTurn observe turn admission.
+type runTurnHooks struct {
+	preamble     []codingagent.StreamEvent // emitted at the head of the first relay
+	onRegistered func()                    // idempotent; called after Register, or when runTurn returns without registering
+}
+
 func (s *Server) runTurn(
 	r *http.Request,
 	w http.ResponseWriter,
@@ -202,6 +217,7 @@ func (s *Server) runTurn(
 	sessionID, turnID, correlationID, promptText, rawUserPrompt, fallbackResume string,
 	baseOpts []codingagent.SessionOption,
 	savedFiles []string,
+	hooks runTurnHooks,
 ) {
 	agent := s.agents[record.AgentName]
 	maxAttempts, interval := s.processRetryLimits(record.AgentName)
@@ -212,8 +228,19 @@ func (s *Server) runTurn(
 	registered := false
 	healFresh := false
 
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			if hooks.onRegistered != nil {
+				hooks.onRegistered()
+			}
+		}
+	}
+	defer release()
+
 	finish := func() {
-		s.finishActiveExecution(sessionID, agentSess, savedFiles)
+		s.finishExecution(active, sessionID, agentSess, savedFiles)
 	}
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -298,6 +325,9 @@ func (s *Server) runTurn(
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if !registered && len(hooks.preamble) > 0 {
+			ch = prependEvents(ch, hooks.preamble...)
+		}
 		relay := newEventRelayWithHeartbeat(ch, s.resolvedToolHeartbeatInterval())
 		stdin, _ := sess.(codingagent.StdinWriter)
 		if !registered {
@@ -319,6 +349,7 @@ func (s *Server) runTurn(
 			}
 			registered = true
 			s.markSessionActive(sessionID)
+			release()
 			if wantSSE {
 				s.startSideEffectPump(active)
 			}
@@ -335,8 +366,17 @@ func (s *Server) runTurn(
 			if suspended {
 				return
 			}
+			if active.isStopped() {
+				// A cancel / interrupt / terminate already wrote the final state and
+				// owns closing; do not retry or self-heal this execution.
+				s.finishExecution(active, sessionID, agentSess, savedFiles)
+				if r.Context().Err() == nil {
+					s.writeSSEDone(w)
+				}
+				return
+			}
 			if term.kind == codingagent.EventResult {
-				s.finishActiveExecution(sessionID, agentSess, savedFiles)
+				s.finishExecution(active, sessionID, agentSess, savedFiles)
 				if s.logger != nil {
 					s.logger.Debug("unregistered before done", "session_id", sessionID, "suspended", false)
 				}
@@ -355,7 +395,7 @@ func (s *Server) runTurn(
 				select {
 				case <-time.After(interval):
 				case <-execCtx.Done():
-					s.finishActiveExecution(sessionID, nil, savedFiles)
+					s.finishExecution(active, sessionID, nil, savedFiles)
 					s.writeSSEDone(w)
 					return
 				}
@@ -366,7 +406,7 @@ func (s *Server) runTurn(
 				content, overloaded := s.classifiedTerminal(term.content)
 				s.emitClassifiedSSE(w, active, content, overloaded)
 			}
-			s.finishActiveExecution(sessionID, agentSess, savedFiles)
+			s.finishExecution(active, sessionID, agentSess, savedFiles)
 			if r.Context().Err() == nil {
 				s.writeSSEDone(w)
 			}
@@ -377,9 +417,14 @@ func (s *Server) runTurn(
 		if suspended {
 			return
 		}
+		if active.isStopped() {
+			writeJSONEvents(w, events)
+			s.finishExecution(active, sessionID, agentSess, savedFiles)
+			return
+		}
 		if term.kind == codingagent.EventResult {
 			writeJSONEvents(w, events)
-			s.finishActiveExecution(sessionID, agentSess, savedFiles)
+			s.finishExecution(active, sessionID, agentSess, savedFiles)
 			return
 		}
 		if term.retryable && attempt < maxAttempts {
@@ -390,7 +435,7 @@ func (s *Server) runTurn(
 			select {
 			case <-time.After(interval):
 			case <-execCtx.Done():
-				s.finishActiveExecution(sessionID, nil, savedFiles)
+				s.finishExecution(active, sessionID, nil, savedFiles)
 				return
 			}
 			continue
@@ -402,7 +447,7 @@ func (s *Server) runTurn(
 			s.updateSessionStatusOnTerminal(sessionID, codingagent.StreamEvent{Type: codingagent.EventError, Content: content}, true, content)
 		}
 		writeJSONEvents(w, events)
-		s.finishActiveExecution(sessionID, agentSess, savedFiles)
+		s.finishExecution(active, sessionID, agentSess, savedFiles)
 		return
 	}
 }
@@ -416,7 +461,7 @@ func (s *Server) emitClassifiedSSE(w http.ResponseWriter, exec *activeExecution,
 	if flusher, ok := w.(http.Flusher); ok {
 		_ = s.writeSSEWireEvents(w, flusher, ev)
 	}
-	if exec != nil {
+	if exec != nil && !exec.suppressesSessionWrites() {
 		s.updateSessionStatusOnTerminal(exec.sessionID, ev, true, content)
 	}
 }
@@ -427,6 +472,14 @@ func writeJSONEvents(w http.ResponseWriter, events []codingagent.StreamEvent) {
 }
 
 func (s *Server) handleRelaySideEffects(sessionID string, exec *activeExecution, ev codingagent.StreamEvent, writeSSE bool, w http.ResponseWriter, flusher http.Flusher) (suspended bool, writeErr error) {
+	if exec.suppressesSessionWrites() {
+		// A stopped turn must not touch the session record; only keep the task log
+		// when no SSE subscriber is attached (attachSSE Adds synchronously otherwise).
+		if s.taskLog != nil && !exec.hasSubscriber() {
+			s.taskLog.Add(toAgentLogEntry(ev, sessionID, exec.turnID, exec.correlationID))
+		}
+		return false, nil
+	}
 	s.applyUsageSideEffects(sessionID, exec, &ev)
 	if ev.Type == codingagent.EventUserInputRequired {
 		suspended = true
@@ -470,7 +523,7 @@ func (s *Server) startSideEffectPump(exec *activeExecution) {
 func (s *Server) pumpExecSideEffects(exec *activeExecution) {
 	sessionID := exec.sessionID
 	for {
-		if _, ok := s.execRegistry.Get(sessionID); !ok {
+		if cur, ok := s.execRegistry.Get(sessionID); !ok || cur != exec || exec.isStopped() {
 			return
 		}
 		relay := exec.relay
@@ -499,7 +552,7 @@ func (s *Server) pumpExecSideEffects(exec *activeExecution) {
 func (s *Server) armReattachTimer(exec *activeExecution) {
 	exec.subMu.Lock()
 	defer exec.subMu.Unlock()
-	if exec.subCancel != nil || exec.status == codingagent.StatusSuspended {
+	if exec.subCancel != nil || exec.status == codingagent.StatusSuspended || exec.isStopped() {
 		return
 	}
 	if exec.reattachTimer != nil {
@@ -520,10 +573,13 @@ func (s *Server) waitDetached(ctx context.Context, exec *activeExecution) (strea
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
+		if exec.isStopped() {
+			return streamTerminal{kind: codingagent.EventError, content: stoppedTerminalContent(exec.stoppedReason())}, false
+		}
 		if !exec.hasSubscriber() {
 			s.armReattachTimer(exec)
 		}
-		if _, ok := s.execRegistry.Get(sessionID); !ok {
+		if cur, ok := s.execRegistry.Get(sessionID); !ok || cur != exec {
 			return streamTerminal{kind: codingagent.EventError, content: drainTimeoutTerminalContent}, false
 		}
 		rec, err := s.sessions.Get(sessionID)
@@ -619,7 +675,9 @@ func (s *Server) attachSSE(ctx context.Context, w http.ResponseWriter, exec *act
 	writeEvent := func(ev codingagent.StreamEvent) bool {
 		ev.TurnID = exec.turnID
 		ev.CorrelationID = exec.correlationID
-		s.applyUsageSideEffects(sessionID, exec, &ev)
+		if !exec.suppressesSessionWrites() {
+			s.applyUsageSideEffects(sessionID, exec, &ev)
+		}
 		logicalID := idx
 		idx++
 		exec.streamOffset = idx
@@ -687,7 +745,9 @@ func (s *Server) attachSSE(ctx context.Context, w http.ResponseWriter, exec *act
 			return
 		}
 		terminalWritten = true
-		s.updateSessionStatusOnTerminal(sessionID, ev, ev.Type == codingagent.EventError, ev.Content)
+		if !exec.suppressesSessionWrites() {
+			s.updateSessionStatusOnTerminal(sessionID, ev, ev.Type == codingagent.EventError, ev.Content)
+		}
 	}
 
 	for {
@@ -751,6 +811,10 @@ func (s *Server) streamSSERelay(ctx context.Context, w http.ResponseWriter, exec
 	if detached && !suspended {
 		return s.waitDetached(context.Background(), exec)
 	}
+	if exec.suppressesSessionWrites() {
+		// A stopped turn: the stopper wrote the final state and already reconciled.
+		return term, suspended
+	}
 	if record, err := s.sessions.Get(exec.sessionID); err == nil {
 		if record.Error == turnCancelledError {
 			// CancelTurn already set non-closed status; do not overwrite.
@@ -812,7 +876,9 @@ func (s *Server) respondJSONRelay(ctx context.Context, w http.ResponseWriter, ex
 					term = streamTerminal{kind: codingagent.EventError, retryable: true, content: ev.Content}
 					continue
 				}
-				s.applyUsageSideEffects(sessionID, exec, &ev)
+				if !exec.suppressesSessionWrites() {
+					s.applyUsageSideEffects(sessionID, exec, &ev)
+				}
 				if ev.Type == codingagent.EventResult {
 					term = streamTerminal{kind: codingagent.EventResult}
 				}
@@ -820,7 +886,9 @@ func (s *Server) respondJSONRelay(ctx context.Context, w http.ResponseWriter, ex
 					term = streamTerminal{kind: codingagent.EventError, content: ev.Content}
 				}
 				events = append(events, ev)
-				s.updateSessionStatusOnTerminal(sessionID, ev, ev.Type == codingagent.EventError, ev.Content)
+				if !exec.suppressesSessionWrites() {
+					s.updateSessionStatusOnTerminal(sessionID, ev, ev.Type == codingagent.EventError, ev.Content)
+				}
 			case <-drainCh():
 				term = s.stopExecOnDrainTimeout(sessionID, exec)
 				goto done
@@ -844,7 +912,9 @@ func (s *Server) respondJSONRelay(ctx context.Context, w http.ResponseWriter, ex
 				term = streamTerminal{kind: codingagent.EventError, retryable: true, content: ev.Content}
 				continue
 			}
-			s.applyUsageSideEffects(sessionID, exec, &ev)
+			if !exec.suppressesSessionWrites() {
+				s.applyUsageSideEffects(sessionID, exec, &ev)
+			}
 			events = append(events, ev)
 			if ev.Type == codingagent.EventResult {
 				term = streamTerminal{kind: codingagent.EventResult}
@@ -854,9 +924,11 @@ func (s *Server) respondJSONRelay(ctx context.Context, w http.ResponseWriter, ex
 			}
 			if ev.Type == codingagent.EventUserInputRequired {
 				suspended = true
-				if rec, err := s.sessions.Get(sessionID); err == nil {
-					rec.Status = codingagent.StatusSuspended
-					s.sessions.Update(rec)
+				if !exec.suppressesSessionWrites() {
+					if rec, err := s.sessions.Get(sessionID); err == nil {
+						rec.Status = codingagent.StatusSuspended
+						s.sessions.Update(rec)
+					}
 				}
 				s.execRegistry.SetStatus(sessionID, codingagent.StatusSuspended)
 				exec.status = codingagent.StatusSuspended
@@ -865,11 +937,13 @@ func (s *Server) respondJSONRelay(ctx context.Context, w http.ResponseWriter, ex
 					return term, events, true
 				}
 			}
-			s.updateSessionStatusOnTerminal(sessionID, ev, ev.Type == codingagent.EventError, ev.Content)
+			if !exec.suppressesSessionWrites() {
+				s.updateSessionStatusOnTerminal(sessionID, ev, ev.Type == codingagent.EventError, ev.Content)
+			}
 			if s.taskLog != nil {
 				s.taskLog.Add(toAgentLogEntry(ev, sessionID, exec.turnID, exec.correlationID))
 			}
-			if ev.Type == codingagent.EventSystem && ev.SessionID != "" {
+			if ev.Type == codingagent.EventSystem && ev.SessionID != "" && !exec.suppressesSessionWrites() {
 				if record, err := s.sessions.Get(sessionID); err == nil {
 					record.AgentSessionID = ev.SessionID
 					s.sessions.Update(record)
@@ -878,6 +952,9 @@ func (s *Server) respondJSONRelay(ctx context.Context, w http.ResponseWriter, ex
 		}
 	}
 done:
+	if exec.suppressesSessionWrites() {
+		return term, events, suspended
+	}
 	if record, err := s.sessions.Get(sessionID); err == nil {
 		if term.kind == codingagent.EventError && !term.retryable {
 			record.Status = codingagent.StatusError

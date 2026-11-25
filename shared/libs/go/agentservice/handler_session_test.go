@@ -356,8 +356,8 @@ func TestHandlePatchSession_BusyRejected(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "session busy") {
 		t.Errorf("body = %s", w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "follow, respond, cancel or terminate") {
-		t.Errorf("hint missing follow/cancel: %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), "follow, respond, interrupt, cancel or terminate") {
+		t.Errorf("hint missing follow/interrupt/cancel: %s", w.Body.String())
 	}
 	got := getSessionMap(t, handler, id)
 	if got["followable"] != true {

@@ -12,7 +12,15 @@ import (
 // ErrSessionBusy is returned when a session already has an active execution.
 var ErrSessionBusy = errors.New("session busy")
 
-const hintSessionBusy = "follow, respond, cancel or terminate"
+const hintSessionBusy = "follow, respond, interrupt, cancel or terminate"
+
+// Stop reasons recorded on an execution stopped outside its own runTurn loop.
+const (
+	stopReasonCancelled    = "cancelled"
+	stopReasonInterrupted  = "interrupted"
+	stopReasonTerminated   = "terminated"
+	stopReasonDrainTimeout = "drain_timeout"
+)
 
 // DefaultToolHeartbeatInterval is the SSE progress heartbeat period while a
 // tool is in-flight (EventToolUse until matching EventToolResult / turn end).
@@ -41,6 +49,51 @@ type activeExecution struct {
 	subCancel     context.CancelFunc
 	subscriberGen int
 	reattachTimer *time.Timer
+
+	stopMu     sync.Mutex
+	stopReason string
+}
+
+// markStopped records why exec was stopped. It returns false when exec was already stopped.
+func (e *activeExecution) markStopped(reason string) bool {
+	if e == nil {
+		return false
+	}
+	e.stopMu.Lock()
+	defer e.stopMu.Unlock()
+	if e.stopReason != "" {
+		return false
+	}
+	e.stopReason = reason
+	return true
+}
+
+// stoppedReason returns why exec was stopped, or "" when it is still running. nil-safe.
+func (e *activeExecution) stoppedReason() string {
+	if e == nil {
+		return ""
+	}
+	e.stopMu.Lock()
+	defer e.stopMu.Unlock()
+	return e.stopReason
+}
+
+// isStopped reports whether exec was stopped outside its own runTurn loop. nil-safe.
+func (e *activeExecution) isStopped() bool {
+	return e.stoppedReason() != ""
+}
+
+// suppressesSessionWrites reports whether late writes from exec to the session record
+// (status, error, agent_session_id, usage) must be skipped: the API call that stopped it
+// (cancel / interrupt / terminate) writes the final state itself. Drain timeouts keep
+// today's late status write.
+func (e *activeExecution) suppressesSessionWrites() bool {
+	switch e.stoppedReason() {
+	case stopReasonCancelled, stopReasonInterrupted, stopReasonTerminated:
+		return true
+	default:
+		return false
+	}
 }
 
 type execRegistry struct {
@@ -81,6 +134,33 @@ func (r *execRegistry) Unregister(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.exec, id)
+}
+
+// UnregisterIf removes id only when it still maps to exec.
+func (r *execRegistry) UnregisterIf(id string, exec *activeExecution) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cur, ok := r.exec[id]; ok && cur == exec {
+		delete(r.exec, id)
+		return true
+	}
+	return false
+}
+
+// prependEvents yields preamble before forwarding every event of src; the
+// returned channel closes when src closes.
+func prependEvents(src <-chan codingagent.StreamEvent, preamble ...codingagent.StreamEvent) <-chan codingagent.StreamEvent {
+	out := make(chan codingagent.StreamEvent, len(preamble)+8)
+	go func() {
+		defer close(out)
+		for _, ev := range preamble {
+			out <- ev
+		}
+		for ev := range src {
+			out <- ev
+		}
+	}()
+	return out
 }
 
 func (e *activeExecution) stopReattachTimer() {
