@@ -37,6 +37,7 @@ After all parts are sent, the server emits:
 
 - `content` is **empty**
 - `chunk_id` matches the preceding `tool_result_part` events
+- `tool_call_id`, when the original `tool_result` had one, is repeated on every `tool_result_part` and on this completion marker
 - Consumers concatenate all part `content` values in `index` order to reconstruct the full tool result
 
 ## Small payloads (backward compatible)

@@ -411,3 +411,86 @@ func findEvent(t *testing.T, evs []v1.Event, typ v1.EventType) v1.Event {
 	t.Fatalf("event type %q not found in %#v", typ, evs)
 	return v1.Event{}
 }
+
+func TestStream_Events_ExposesToolCallID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"tool_use\",\"tool_name\":\"Read\",\"tool_call_id\":\"a\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"tool_use\",\"tool_name\":\"Bash\",\"tool_call_id\":\"b\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"tool_result\",\"content\":\"rb\",\"tool_call_id\":\"b\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"tool_result\",\"content\":\"ra\",\"tool_call_id\":\"a\"}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var uses, results []string
+	for ev := range v1.NewStreamFromReader(resp.Body).Events() {
+		switch ev.Type {
+		case v1.EventToolUse:
+			uses = append(uses, ev.ToolCallID)
+		case v1.EventToolResult:
+			results = append(results, ev.ToolCallID+":"+ev.Text)
+		}
+	}
+	if got := strings.Join(uses, ","); got != "a,b" {
+		t.Fatalf("tool_use ids = %q, want a,b", got)
+	}
+	if got := strings.Join(results, ","); got != "b:rb,a:ra" {
+		t.Fatalf("tool_result ids = %q, want b:rb,a:ra", got)
+	}
+}
+
+func TestStream_Events_ChunkedToolResultExposesToolCallID(t *testing.T) {
+	chunkID := "chunk-1"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"type\":\"tool_result_part\",\"chunk_id\":\"%s\",\"index\":0,\"total\":2,\"content\":\"aa\",\"tool_call_id\":\"t1\"}\n\n", chunkID)
+		fmt.Fprintf(w, "data: {\"type\":\"tool_result_part\",\"chunk_id\":\"%s\",\"index\":1,\"total\":2,\"content\":\"bb\",\"tool_call_id\":\"t1\"}\n\n", chunkID)
+		fmt.Fprintf(w, "data: {\"type\":\"tool_result\",\"chunk_id\":\"%s\",\"content\":\"\",\"tool_call_id\":\"t1\"}\n\n", chunkID)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var evs []v1.Event
+	for ev := range v1.NewStreamFromReader(resp.Body).Events() {
+		evs = append(evs, ev)
+	}
+	got := findEvent(t, evs, v1.EventToolResult)
+	if got.Text != "aabb" || got.ToolCallID != "t1" {
+		t.Fatalf("tool_result = {Text:%q ToolCallID:%q}, want {aabb t1}", got.Text, got.ToolCallID)
+	}
+}
+
+func TestStream_Events_ToolCallIDEmptyWhenAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"tool_use\",\"tool_name\":\"command_execution\"}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"tool_result\",\"content\":\"ok\"}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	for ev := range v1.NewStreamFromReader(resp.Body).Events() {
+		if (ev.Type == v1.EventToolUse || ev.Type == v1.EventToolResult) && ev.ToolCallID != "" {
+			t.Fatalf("%s ToolCallID = %q, want empty", ev.Type, ev.ToolCallID)
+		}
+	}
+}

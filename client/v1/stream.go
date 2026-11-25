@@ -58,6 +58,9 @@ type Event struct {
 	UserInputRequired UserInputRequiredEvent
 	ID                string
 	Usage             *TokenUsage
+	// ToolCallID pairs a tool_use with its tool_result. It is set only when the
+	// agent reports it (Claude Code); otherwise it is empty.
+	ToolCallID string
 }
 
 // Stream processes SSE events from a session message.
@@ -298,6 +301,7 @@ func (s *Stream) events() <-chan Event {
 				Content       string         `json:"content"`
 				ToolName      string         `json:"tool_name,omitempty"`
 				ToolInput     map[string]any `json:"tool_input,omitempty"`
+				ToolCallID    string         `json:"tool_call_id,omitempty"`
 				PromptID      string         `json:"prompt_id,omitempty"`
 				Choices       []string       `json:"choices,omitempty"`
 				TurnID        string         `json:"turn_id,omitempty"`
@@ -324,7 +328,7 @@ func (s *Stream) events() <-chan Event {
 				}
 				continue
 			case EventToolResult:
-				ev := Event{Type: EventToolResult, Text: raw.Content, ToolName: raw.ToolName}
+				ev := Event{Type: EventToolResult, Text: raw.Content, ToolName: raw.ToolName, ToolCallID: raw.ToolCallID}
 				if raw.Content == "" && raw.ChunkID != "" {
 					content, err := assembler.Complete(raw.ChunkID)
 					if err != nil {
@@ -343,6 +347,7 @@ func (s *Stream) events() <-chan Event {
 				Text:          raw.Content,
 				ToolName:      raw.ToolName,
 				ToolInput:     raw.ToolInput,
+				ToolCallID:    raw.ToolCallID,
 				TurnID:        raw.TurnID,
 				CorrelationID: raw.CorrelationID,
 				Usage:         raw.Usage,

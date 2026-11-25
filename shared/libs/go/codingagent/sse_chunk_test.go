@@ -203,3 +203,43 @@ func TestSplitStreamEventForSSE_NonToolResultPassthrough(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitStreamEventForSSE_ChunkedToolResultKeepsToolCallID(t *testing.T) {
+	ev := codingagent.StreamEvent{
+		Type:       codingagent.EventToolResult,
+		ToolCallID: "toolu_1",
+		Content:    strings.Repeat("c", codingagent.DefaultMaxToolResultBytes),
+	}
+	events, err := codingagent.SplitStreamEventForSSE(ev, 0)
+	if err != nil {
+		t.Fatalf("SplitStreamEventForSSE: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("len(events) = %d, want at least 2", len(events))
+	}
+	for i, e := range events {
+		if e.ToolCallID != "toolu_1" {
+			t.Fatalf("events[%d] (%s) ToolCallID = %q, want %q", i, e.Type, e.ToolCallID, "toolu_1")
+		}
+	}
+}
+
+func TestSplitStreamEventForSSE_ChunkedToolResultOmitsEmptyToolCallID(t *testing.T) {
+	ev := codingagent.StreamEvent{
+		Type:    codingagent.EventToolResult,
+		Content: strings.Repeat("d", codingagent.DefaultMaxToolResultBytes),
+	}
+	events, err := codingagent.SplitStreamEventForSSE(ev, 0)
+	if err != nil {
+		t.Fatalf("SplitStreamEventForSSE: %v", err)
+	}
+	for i, e := range events {
+		data, err := json.Marshal(e)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if strings.Contains(string(data), "tool_call_id") {
+			t.Fatalf("events[%d] wire contains tool_call_id: %s", i, data[:min(len(data), 200)])
+		}
+	}
+}
