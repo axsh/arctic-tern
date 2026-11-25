@@ -46,11 +46,16 @@ func (s *Server) resolveAgentConfig(agentName string) config.AgentConfig {
 // handleListAgents handles GET /api/v1/agents.
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	type agentInfo struct {
-		Name string `json:"name"`
+		Name                    string `json:"name"`
+		SupportsInterruptResume bool   `json:"supports_interrupt_resume"`
 	}
 	agents := make([]agentInfo, 0, len(s.agents))
-	for name := range s.agents {
-		agents = append(agents, agentInfo{Name: name})
+	for name, agent := range s.agents {
+		supports := false
+		if sup, ok := agent.(codingagent.InterruptResumeSupporter); ok {
+			supports = sup.SupportsInterruptResume()
+		}
+		agents = append(agents, agentInfo{Name: name, SupportsInterruptResume: supports})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(agents)

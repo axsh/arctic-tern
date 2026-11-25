@@ -11,6 +11,9 @@ import (
 // Agent describes an available coding agent.
 type Agent struct {
 	Name string `json:"name"`
+	// SupportsInterruptResume reports native interrupt resume; Interrupt falls back
+	// to Tern's replan when false.
+	SupportsInterruptResume bool `json:"supports_interrupt_resume"`
 }
 
 // ListAgents returns the available coding agents.
