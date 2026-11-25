@@ -18,12 +18,16 @@ Coding Agent 自身の中断・再開（Native resume）を、agentservice の�
 
 ## User Review Required
 
+None.
+
+（連続実行承認済み。以下は計画時に確定した設計決定であり、実装はこのとおり行う。）
+
 1. **capability の公開場所**: `GET /api/v1/agents` のエージェントごとのフィールドとする（GetSession には出さない）。能力はアダプタの性質であり、セッションは PATCH でエージェントを切り替えうるため。セッションの能力は `agent_name` で一覧を引けば分かる。
 2. **セッション単位の契約**: `TurnInterrupter.InterruptTurn(ctx, instruction)` は、同じエージェントプロセスの中で現在の作業を止め、指示を注入し、続きのターンを流す**新しいチャネル**を返す。前のイベントチャネルは実装側が必ず閉じる。指示は利用者の文をそのまま渡す（Tern の再計画プロンプトは付けない。エージェントは自分の文脈を持っているため）。
-3. **Native 失敗時の扱い**: 同じ要求の中で Fallback に落とす。仕様は「同一リクエスト内で Fallback に落とすか明示エラーにするかを後続で決める」としていたが、利用者の方針「Fallback を安全網として常に備える」に合わせて本計画で決める。失敗は Warn ログに残し、新ストリームの `interrupt_mode` は `fallback` になる。
-4. **Native の続きのターン**: 新しい `turn_id` を持つ（CAWA の「1 ターン 1 turn_id」を保つ）。続きのターンでは、プロセス再起動を伴うリトライや self-heal を行わない。リトライ可能なエラーで終わった場合は、分類済みエラー（`[upstream_error]` / `[upstream_overloaded]`）として終端する。
-5. **旧ターンの終端は一度だけ**: Native でも、`InterruptTurn` を呼ぶ前に Tern が旧ターンの購読者へ `turn interrupted` を出す。Native が失敗して Fallback に落ちても、旧ターンの終端イベントは重複しない。
-6. **既知の制約（後続のアダプタ仕様で扱う）**: Native で続ける場合でも、元のメッセージに付いていた一時画像ファイル（`arctic-tern-multimodal/`）は旧ターンの終了処理で消える。画像を Native の続きで再参照するアダプタを作るときは、一時画像の寿命を別途扱う。
+3. **Native 失敗時の扱い**: 同じ要求の中で Fallback に落とす。失敗は Warn ログに残し、新ストリームの `interrupt_mode` は `fallback` になる。
+4. **Native の続きのターン**: 新しい `turn_id` を持つ。続きのターンではプロセス再起動を伴うリトライや self-heal を行わない。リトライ可能なエラーで終わった場合は分類済みエラーとして終端する。
+5. **旧ターンの終端は一度だけ**: Native でも `InterruptTurn` を呼ぶ前に Tern が旧ターンの購読者へ `turn interrupted` を出す。Native 失敗で Fallback に落ちても終端イベントは重複しない。
+6. **既知の制約（後続のアダプタ仕様で扱う）**: Native 継続時も一時画像ファイルは旧ターン終了処理で消える。画像を Native 続きで再参照するアダプタは寿命を別途扱う。
 
 ## Requirement Traceability
 
