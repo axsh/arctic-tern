@@ -25,6 +25,7 @@ By default, all API endpoints are exposed at `http://localhost:3100` (customizab
 | `POST` | `/api/v1/sessions/:id/messages` | Send a message (text/image) to a session. |
 | `GET` | `/api/v1/sessions/:id/events` | Reattach to the in-flight turn SSE (no new message). |
 | `POST` | `/api/v1/sessions/:id/cancel` | Abort the in-flight turn; keep the same session id (not closed). |
+| `POST` | `/api/v1/sessions/:id/interrupt` | Interrupt the in-flight turn and start a turn that continues or re-plans. |
 | `POST` | `/api/v1/sessions/:id/terminate` | Force terminate an active session process (status becomes closed). |
 | `GET` | `/api/v1/sessions/:id/usage` | Retrieve session / turn / call token usage aggregates. |
 
@@ -474,7 +475,7 @@ For each `POST /api/v1/sessions/:id/messages` execution, Tern assigns a `turn_id
   - `404 Not Found`: Session not found.
   - `501 Not Implemented`: Returned if an image is sent to an agent that does not support multi-modal input (e.g., `wayfinder`).
 
-- **409** session busy: JSON `error` is `session busy`, `hint` is `follow, respond, cancel or terminate`.
+- **409** session busy: JSON `error` is `session busy`, `hint` is `follow, respond, interrupt, cancel or terminate`.
 - When an execution is in `execRegistry`, Get Session includes `followable: true` and `turn_id` of that turn.
 
 ---
@@ -527,6 +528,53 @@ Aborts the current turn (cancels execution context, best-effort stops the agent 
   ```
 
 `client/v1`: `Session.CancelTurn(ctx)`.
+
+- Unlike `interrupt`, `cancel` does **not** record the stopped turn's partial assistant / tool output into canonical history. Use `interrupt` when you want the interrupted progress preserved and a new turn to continue from it.
+- A `cancel` that arrives while an `interrupt` is still transitioning (old turn stopping, new turn not yet registered) waits for the transition to complete, then stops the **new** (replan) turn.
+
+---
+
+### 9.1 Interrupt In-Flight Turn
+
+Interrupts the in-flight turn and immediately starts a new turn on the **same session id** that reconciles the user's new instruction with the progress observed so far. In the MVP the interrupt always runs in **`fallback`** mode (`native` resume is a future extension). Fallback replan:
+
+1. stops the in-flight turn (same immediate stop as `cancel`, but the session is **not** set to `closed`);
+2. ingests the stopped turn's partial assistant text and tool calls into canonical history (best effort);
+3. appends a canonical `user` record describing the interrupt (see below);
+4. starts a new turn whose prompt opens with a `Tern turn interrupt` header, a progress summary of the stopped turn, and the user's instruction last;
+5. keeps the native conversation id so the agent resumes its own thread where supported.
+
+- **Method**: `POST`
+- **Path**: `/api/v1/sessions/:id/interrupt`
+- **Request Body (JSON)**:
+  - `content` (string, Required): The new instruction / change of plan. Must be non-empty.
+  - `correlation_id` (string, Optional): Echoed on the new turn's events.
+  - `supplement` (object, Optional): Same shape as Send Message / PATCH.
+  ```json
+  {
+    "content": "Stop. Only create b.txt, skip the rest.",
+    "correlation_id": "job-20260814-002"
+  }
+  ```
+- **Response = the new turn's stream.** Content negotiation is identical to Send Message: with `Accept: text/event-stream` the response is the SSE of the **new** turn; otherwise it is the aggregated JSON array of that turn's events. The new turn has a **new `turn_id`**. If the connection drops, reattach to the new turn with `GET /api/v1/sessions/:id/events`.
+  - The new turn's stream opens with a system event that carries the interrupt observability fields:
+    ```json
+    {"type":"system","content":"turn interrupt","interrupt_mode":"fallback","interrupted_turn_id":"<old turn_id>","turn_id":"<new turn_id>"}
+    ```
+  - Subscribers of the **old** turn (the original `POST /messages` SSE or a Follow) receive a terminal `{"type":"error","content":"turn interrupted","turn_id":"<old turn_id>"}` followed by `data: [DONE]`.
+- **Canonical interrupt record**: a `user` message whose first line is `[Tern interrupt] interrupted_turn_id=<old turn_id> mode=<mode>` and whose remaining lines are the `content`. The stopped turn's partial facts are ingested **before** this record, so the history order is: original user prompt → partial assistant/tool facts → interrupt record → replan turn output.
+- **Suspended turns** (waiting on `user_input_required`) also accept interrupt; it is treated as a change of plan rather than an answer. This lets Wayfinder (which has no stdin to `respond`) change course.
+- **Concurrency / turn gate**: turn-starting and turn-changing requests are serialized per session. A second `interrupt` that arrives while the first is still transitioning returns `409 {"error":"turn transition in progress"}`. `messages` / `PATCH` / `respond` / `cancel` / `terminate` wait for the gate and then act on the resulting (new) turn.
+- **Status Codes**:
+  - `200 OK`: Interrupt accepted; the response streams the new turn.
+  - `400 Bad Request`: Empty `content`, invalid body, or unknown `supplement.algorithm`.
+  - `404 Not Found`: Session not found.
+  - `409 Conflict`: `session closed`, `no active turn` (nothing in flight — use Send Message instead), or `turn transition in progress`.
+  - `413 Request Entity Too Large`: `content` exceeds the agent's prompt budget (`MaxPromptBytes` minus the reserved interrupt context).
+  - `500 Internal Server Error`: Agent not available.
+- **Observability**: the server logs `turn interrupted` with `mode`, `interrupted_turn_id`, and the new `turn_id`.
+
+`client/v1`: `Session.Interrupt(ctx, content)` and `Session.InterruptWithOpts(ctx, content, InterruptOpts{...})`. The returned `Stream` is the new turn; the call returns an error containing `HTTP 409` when there is no in-flight turn.
 
 ---
 

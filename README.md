@@ -52,7 +52,7 @@ See [Use Cases](docs/use-cases.md) for more.
 
 Tern consists of three major components:
 
-* **CAWA** — Coding Agent Web API (agent lifecycle, multimodal content, interactive turns)
+* **CAWA** — Coding Agent Web API (agent lifecycle, multimodal content, interactive turns, turn interrupt)
 * **LLMGP** — LLM Gateway Protocol (providers, vault-backed credentials, routing)
 * **Integration Layer** — connects agents and models through a unified abstraction
 

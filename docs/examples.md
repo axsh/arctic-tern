@@ -160,9 +160,23 @@ If `OnUserInputRequired` is not set, the SDK stops with an error when input is r
 
 `OnToolUse` receives tool arguments from the SSE `tool_input` field (`Event.ToolInput`). This is a breaking change from the previous `func(toolName string)` signature; see [docs/client-sse-tool-input.md](client-sse-tool-input.md).
 
-While a session is `suspended`, only `respond`, `cancel`, and `terminate` are accepted. Sending a new message to the same session returns HTTP 409 Conflict.
+While a session is `suspended`, only `respond`, `interrupt`, `cancel`, and `terminate` are accepted. Sending a new message to the same session returns HTTP 409 Conflict.
 
 If a turn appears stuck but you want to keep the session for resume, call `session.CancelTurn(ctx)` (status stays non-closed). Use `session.Terminate(ctx)` only when you intend to close the session.
+
+**Interrupt an in-flight turn with a change of plan:**
+
+```go
+// While a turn is running, redirect it. The returned stream is a new turn that
+// reconciles the interrupted progress with your instruction.
+stream, err := session.Interrupt(ctx, "Stop. Only create b.txt, skip the rest.")
+if err != nil {
+    // HTTP 409 means nothing is in flight; use SendText to start a fresh turn.
+}
+stream.Output(os.Stdout)
+```
+
+Use `Respond` to answer a `user_input_required` prompt, `Interrupt` to change the plan mid-turn (keeps partial progress in canonical history and starts a new turn), and `CancelTurn` to simply stop the turn without starting a new one. All three keep the session open; only `Terminate` closes it.
 
 While a tool runs with no agent stdout, Tern emits SSE `progress` events with `content: "tool_still_running"` (default every 30s) so clients can treat the stream as alive. See [docs/reference-manual-web-apis.md](reference-manual-web-apis.md).
 

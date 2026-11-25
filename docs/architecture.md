@@ -8,7 +8,7 @@ Tern consists of three major components.
 
 Coding Agent Web API.
 
-CAWA defines a common interface for Coding Agents. The v1 API uses structured content blocks supporting both text-only and multimodal inputs (text + images). It also supports interactive execution: agents can request user input mid-task via `user_input_required` events, and clients reply through the `respond` endpoint.
+CAWA defines a common interface for Coding Agents. The v1 API uses structured content blocks supporting both text-only and multimodal inputs (text + images). It also supports interactive execution: agents can request user input mid-task via `user_input_required` events, and clients reply through the `respond` endpoint. A running turn can also be interrupted via the `interrupt` endpoint, letting the user change course mid-turn on the same session while preserving the interrupted progress.
 
 ### LLMGP
 
