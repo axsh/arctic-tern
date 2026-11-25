@@ -35,3 +35,19 @@ type Session interface {
 type StdinWriter interface {
 	WriteStdin(text string) error
 }
+
+// InterruptResumeSupporter is an optional CodingAgent capability: sessions of this
+// agent can natively interrupt the in-flight turn and continue it with an injected
+// instruction. Agents that do not implement it are treated as not supporting it.
+type InterruptResumeSupporter interface {
+	SupportsInterruptResume() bool
+}
+
+// TurnInterrupter is implemented by sessions that support native interrupt resume.
+// InterruptTurn stops the in-flight work inside the running agent, injects
+// instruction, and returns a new channel that streams the continued turn until it
+// completes. The implementation must close the previous event channel. An error
+// means the agent did not take over; Tern then falls back to its own replan.
+type TurnInterrupter interface {
+	InterruptTurn(ctx context.Context, instruction string) (<-chan StreamEvent, error)
+}
