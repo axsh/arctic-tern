@@ -326,6 +326,53 @@ func (s *Session) Terminate(ctx context.Context) error {
 	return nil
 }
 
+// InterruptOpts are optional Interrupt fields.
+type InterruptOpts struct {
+	CorrelationID string
+	Supplement    *SupplementStrategy
+}
+
+// Interrupt stops the in-flight turn and starts a new turn that continues or
+// re-plans with content. The returned Stream is the new turn. The server returns
+// HTTP 409 when the session has no in-flight turn (use SendText instead).
+func (s *Session) Interrupt(ctx context.Context, content string) (*Stream, error) {
+	return s.InterruptWithOpts(ctx, content, InterruptOpts{})
+}
+
+// InterruptWithOpts is Interrupt with optional correlation_id and supplement.
+func (s *Session) InterruptWithOpts(ctx context.Context, content string, opts InterruptOpts) (*Stream, error) {
+	body, err := json.Marshal(map[string]any{
+		"content":        content,
+		"correlation_id": opts.CorrelationID,
+		"supplement":     opts.Supplement,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal interrupt: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		s.client.baseURL+"/api/v1/sessions/"+s.ID+"/interrupt",
+		bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create interrupt request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := s.client.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send interrupt: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("interrupt failed (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return newStream(resp.Body), nil
+}
+
 // CancelTurn aborts the in-flight turn without closing the session.
 // The same session id remains usable for a subsequent SendMessage / PATCH.
 // Distinct from Terminate (which sets status closed).

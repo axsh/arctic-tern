@@ -29,6 +29,13 @@ const (
 	EventUserInputRequired EventType = "user_input_required"
 )
 
+// Interrupt values observed on streams (see POST /api/v1/sessions/:id/interrupt).
+const (
+	InterruptModeFallback  = "fallback"
+	InterruptModeNative    = "native"
+	TurnInterruptedContent = "turn interrupted" // terminal error content on an interrupted turn's stream
+)
+
 // UserInputRequiredEvent carries structured user-input request data.
 type UserInputRequiredEvent struct {
 	Content  string
@@ -58,6 +65,10 @@ type Event struct {
 	UserInputRequired UserInputRequiredEvent
 	ID                string
 	Usage             *TokenUsage
+	// InterruptMode is set on the system event that opens a turn started by Interrupt.
+	InterruptMode string
+	// InterruptedTurnID is the turn_id that Interrupt stopped.
+	InterruptedTurnID string
 }
 
 // Stream processes SSE events from a session message.
@@ -294,18 +305,20 @@ func (s *Stream) events() <-chan Event {
 				break
 			}
 			var raw struct {
-				Type          string         `json:"type"`
-				Content       string         `json:"content"`
-				ToolName      string         `json:"tool_name,omitempty"`
-				ToolInput     map[string]any `json:"tool_input,omitempty"`
-				PromptID      string         `json:"prompt_id,omitempty"`
-				Choices       []string       `json:"choices,omitempty"`
-				TurnID        string         `json:"turn_id,omitempty"`
-				CorrelationID string         `json:"correlation_id,omitempty"`
-				ChunkID       string         `json:"chunk_id,omitempty"`
-				Index         int            `json:"index,omitempty"`
-				Total         int            `json:"total,omitempty"`
-				Usage         *TokenUsage    `json:"usage,omitempty"`
+				Type              string         `json:"type"`
+				Content           string         `json:"content"`
+				ToolName          string         `json:"tool_name,omitempty"`
+				ToolInput         map[string]any `json:"tool_input,omitempty"`
+				PromptID          string         `json:"prompt_id,omitempty"`
+				Choices           []string       `json:"choices,omitempty"`
+				TurnID            string         `json:"turn_id,omitempty"`
+				CorrelationID     string         `json:"correlation_id,omitempty"`
+				ChunkID           string         `json:"chunk_id,omitempty"`
+				Index             int            `json:"index,omitempty"`
+				Total             int            `json:"total,omitempty"`
+				Usage             *TokenUsage    `json:"usage,omitempty"`
+				InterruptMode     string         `json:"interrupt_mode,omitempty"`
+				InterruptedTurnID string         `json:"interrupted_turn_id,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(data), &raw); err != nil {
 				continue
@@ -339,13 +352,15 @@ func (s *Stream) events() <-chan Event {
 			}
 
 			ev := Event{
-				Type:          EventType(raw.Type),
-				Text:          raw.Content,
-				ToolName:      raw.ToolName,
-				ToolInput:     raw.ToolInput,
-				TurnID:        raw.TurnID,
-				CorrelationID: raw.CorrelationID,
-				Usage:         raw.Usage,
+				Type:              EventType(raw.Type),
+				Text:              raw.Content,
+				ToolName:          raw.ToolName,
+				ToolInput:         raw.ToolInput,
+				TurnID:            raw.TurnID,
+				CorrelationID:     raw.CorrelationID,
+				Usage:             raw.Usage,
+				InterruptMode:     raw.InterruptMode,
+				InterruptedTurnID: raw.InterruptedTurnID,
 			}
 			if s.turnID == "" && raw.TurnID != "" {
 				s.turnID = raw.TurnID

@@ -464,3 +464,70 @@ func TestCancelTurn_UsesCancelPath(t *testing.T) {
 	}
 }
 
+func TestInterrupt_UsesInterruptPathAndBody(t *testing.T) {
+	var gotMethod, gotPath, gotAccept string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotAccept = r.Header.Get("Accept")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"type\":\"system\",\"content\":\"turn interrupt\",\"interrupt_mode\":\"fallback\"}\n\n")
+		fmt.Fprintf(w, "data: {\"type\":\"result\"}\n\n")
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := v1.New(srv.URL, v1.WithNoTimeout())
+	sess := v1.ResumeSession(c, "sess-int")
+	stream, err := sess.InterruptWithOpts(context.Background(), "redo", v1.InterruptOpts{CorrelationID: "c1"})
+	if err != nil {
+		t.Fatalf("InterruptWithOpts: %v", err)
+	}
+	var types []v1.EventType
+	for ev := range stream.Events() {
+		types = append(types, ev.Type)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s", gotMethod)
+	}
+	if gotPath != "/api/v1/sessions/sess-int/interrupt" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotAccept != "text/event-stream" {
+		t.Fatalf("Accept = %s", gotAccept)
+	}
+	if gotBody["content"] != "redo" {
+		t.Fatalf("body content = %v", gotBody["content"])
+	}
+	if gotBody["correlation_id"] != "c1" {
+		t.Fatalf("body correlation_id = %v", gotBody["correlation_id"])
+	}
+	if len(types) < 2 || types[0] != v1.EventSystem || types[1] != v1.EventResult {
+		t.Fatalf("events = %v", types)
+	}
+}
+
+func TestInterrupt_HTTPErrorIncludesStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"no active turn"}`))
+	}))
+	defer srv.Close()
+
+	c := v1.New(srv.URL)
+	sess := v1.ResumeSession(c, "sess-idle")
+	_, err := sess.Interrupt(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "HTTP 409") {
+		t.Fatalf("missing HTTP 409 in %q", msg)
+	}
+	if !strings.Contains(msg, "no active turn") {
+		t.Fatalf("missing error body in %q", msg)
+	}
+}
+

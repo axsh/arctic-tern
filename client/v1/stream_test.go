@@ -411,3 +411,28 @@ func findEvent(t *testing.T, evs []v1.Event, typ v1.EventType) v1.Event {
 	t.Fatalf("event type %q not found in %#v", typ, evs)
 	return v1.Event{}
 }
+
+func TestStream_Events_DecodesInterruptFields(t *testing.T) {
+	payload := "data: {\"type\":\"system\",\"content\":\"turn interrupt\",\"turn_id\":\"t2\",\"interrupt_mode\":\"fallback\",\"interrupted_turn_id\":\"t1\"}\n\n" +
+		"data: {\"type\":\"error\",\"content\":\"turn interrupted\",\"turn_id\":\"t1\"}\n\n" +
+		"data: [DONE]\n\n"
+	stream := v1.NewStreamFromReader(strings.NewReader(payload))
+	var evs []v1.Event
+	for ev := range stream.Events() {
+		evs = append(evs, ev)
+	}
+	sys := findEvent(t, evs, v1.EventSystem)
+	if sys.Text != "turn interrupt" {
+		t.Fatalf("system text = %q", sys.Text)
+	}
+	if sys.InterruptMode != v1.InterruptModeFallback {
+		t.Fatalf("InterruptMode = %q", sys.InterruptMode)
+	}
+	if sys.InterruptedTurnID != "t1" {
+		t.Fatalf("InterruptedTurnID = %q", sys.InterruptedTurnID)
+	}
+	errEv := findEvent(t, evs, v1.EventError)
+	if errEv.Error != v1.TurnInterruptedContent {
+		t.Fatalf("Error = %q", errEv.Error)
+	}
+}
