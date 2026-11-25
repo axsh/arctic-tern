@@ -260,6 +260,15 @@ func (s *Server) Launch(ctx context.Context) error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("shutting down tern server")
 
+	// Always release the artifact store's SQLite file lock, even when a component
+	// shutdown below returns an error (otherwise the lock outlives the process and
+	// breaks test temp-dir cleanup on Windows).
+	defer func() {
+		if s.artifactStore != nil {
+			_ = s.artifactStore.Close()
+		}
+	}()
+
 	if err := s.agentService.Shutdown(ctx); err != nil {
 		return fmt.Errorf("tern: agentservice shutdown: %w", err)
 	}
@@ -270,11 +279,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	if err := s.gateway.Shutdown(ctx); err != nil {
 		return fmt.Errorf("tern: gateway shutdown: %w", err)
-	}
-
-	// Close artifact store (releases the SQLite file lock).
-	if s.artifactStore != nil {
-		_ = s.artifactStore.Close()
 	}
 
 	s.logger.Info("tern server stopped")
