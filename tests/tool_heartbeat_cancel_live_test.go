@@ -333,7 +333,31 @@ func runCodexCancelResumeOnce(t *testing.T, baseURL, workDir string, sleepSec in
 	}
 	events, gotDone := parseE2ESSEEvents(t, resp2)
 	assertTurnTerminal(t, events, gotDone)
+
+	// Regression for the "next turn after cancel never reaches a terminal status"
+	// bug: a resume turn that produced a result must land in completed, and in any
+	// case it must not be stuck in active.
+	resumeInfo := getE2ESession(t, baseURL, sessionID)
+	resumeStatus, _ := resumeInfo["status"].(string)
+	if hasEventType(events, codingagent.EventResult) {
+		if resumeStatus != codingagent.StatusCompleted {
+			t.Fatalf("resume status = %q, want %q", resumeStatus, codingagent.StatusCompleted)
+		}
+	} else if resumeStatus == codingagent.StatusActive {
+		t.Fatalf("resume status stuck %q without a result", resumeStatus)
+	}
 	return true, ""
+}
+
+// hasEventType reports whether events contain an event of type typ
+// (shared with turn_interrupt_live_test.go).
+func hasEventType(events []codingagent.StreamEvent, typ codingagent.EventType) bool {
+	for _, ev := range events {
+		if ev.Type == typ {
+			return true
+		}
+	}
+	return false
 }
 
 // TestLiveToolHeartbeat_Codex verifies SSE progress heartbeats while a real Codex tool runs.
