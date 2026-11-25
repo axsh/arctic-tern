@@ -368,6 +368,236 @@ func TestTurnInterrupt_FollowSeesReplanTurn(t *testing.T) {
 	}
 }
 
+// nativeTurnInterruptAgent is the llm_test counterpart of the agentservice native
+// stub: it declares native interrupt resume, and its session's InterruptTurn
+// continues the turn in-process with text "native-continued" and a result.
+type nativeTurnInterruptAgent struct {
+	name    string
+	creates atomic.Int32
+
+	mu      sync.Mutex
+	prompts []string
+}
+
+func (a *nativeTurnInterruptAgent) Name() string                  { return a.name }
+func (a *nativeTurnInterruptAgent) Close() error                  { return nil }
+func (a *nativeTurnInterruptAgent) SupportsInterruptResume() bool { return true }
+
+func (a *nativeTurnInterruptAgent) CreateSession(_ context.Context, _ ...codingagent.SessionOption) (codingagent.Session, error) {
+	n := a.creates.Add(1)
+	return &nativeTurnInterruptSession{agent: a, turn: int(n)}, nil
+}
+
+type nativeTurnInterruptSession struct {
+	agent     *nativeTurnInterruptAgent
+	turn      int
+	mu        sync.Mutex
+	cur       chan codingagent.StreamEvent
+	takeover  chan struct{}
+	closeOnce sync.Once
+}
+
+func (s *nativeTurnInterruptSession) ID() string   { return fmt.Sprintf("native-ti-%d", s.turn) }
+func (s *nativeTurnInterruptSession) Close() error { return nil }
+
+func (s *nativeTurnInterruptSession) closeCur() {
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		close(s.cur)
+		s.mu.Unlock()
+	})
+}
+
+func (s *nativeTurnInterruptSession) Send(ctx context.Context, prompt string) (<-chan codingagent.StreamEvent, error) {
+	s.agent.mu.Lock()
+	s.agent.prompts = append(s.agent.prompts, prompt)
+	s.agent.mu.Unlock()
+	ch := make(chan codingagent.StreamEvent, 8)
+	s.mu.Lock()
+	s.cur = ch
+	s.takeover = make(chan struct{})
+	s.mu.Unlock()
+	go func() {
+		s.mu.Lock()
+		ch <- codingagent.StreamEvent{Type: codingagent.EventSystem, SessionID: "native-ti-thread-1"}
+		ch <- codingagent.StreamEvent{Type: codingagent.EventText, Content: "working"}
+		ch <- codingagent.StreamEvent{
+			Type:      codingagent.EventToolUse,
+			ToolName:  "command_execution",
+			ToolInput: map[string]any{"command": "sleep 60"},
+		}
+		s.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			s.closeCur()
+		case <-s.takeover:
+		}
+	}()
+	return ch, nil
+}
+
+func (s *nativeTurnInterruptSession) InterruptTurn(_ context.Context, _ string) (<-chan codingagent.StreamEvent, error) {
+	s.mu.Lock()
+	if s.takeover != nil {
+		close(s.takeover)
+	}
+	s.mu.Unlock()
+	s.closeCur()
+	cont := make(chan codingagent.StreamEvent, 8)
+	go func() {
+		defer close(cont)
+		cont <- codingagent.StreamEvent{Type: codingagent.EventText, Content: "native-continued"}
+		cont <- codingagent.StreamEvent{Type: codingagent.EventResult}
+	}()
+	return cont, nil
+}
+
+func newNativeInterruptHTTP(t *testing.T, agent *nativeTurnInterruptAgent) *httptest.Server {
+	t.Helper()
+	srv := agentservice.New(
+		agentservice.WithTaskLog(tasklog.New()),
+		agentservice.WithProcessRetry(config.ProcessRetryConfig{MaxAttempts: 1}),
+		agentservice.WithToolHeartbeatInterval(0),
+	)
+	srv.RegisterAgent(agent)
+	ts := httptest.NewServer(srv.HTTPHandler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestTurnInterrupt_ClientV1NativeStub(t *testing.T) {
+	agent := &nativeTurnInterruptAgent{name: "codex"}
+	ts := newNativeInterruptHTTP(t, agent)
+	client := v1.New(ts.URL, v1.WithNoTimeout())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	agents, err := client.ListAgents(ctx)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	var codexSupports bool
+	var sawCodex bool
+	for _, a := range agents {
+		if a.Name == "codex" {
+			sawCodex = true
+			codexSupports = a.SupportsInterruptResume
+		}
+	}
+	if !sawCodex {
+		t.Fatalf("codex not listed: %+v", agents)
+	}
+	if !codexSupports {
+		t.Fatal("codex SupportsInterruptResume = false, want true")
+	}
+
+	sess, err := client.CreateSession(ctx, v1.SessionRequest{
+		Agent: "codex", WorkDir: t.TempDir(), SessionDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	oldStream, err := sess.SendText(ctx, "run long tool")
+	if err != nil {
+		t.Fatalf("send text: %v", err)
+	}
+	oldEvents := oldStream.Events()
+	readStreamUntilToolUse(t, oldEvents)
+	oldTurn := oldStream.TurnID()
+	if oldTurn == "" {
+		t.Fatal("old turn id empty")
+	}
+
+	newStream, err := sess.Interrupt(ctx, "switch to native path")
+	if err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	var sawNative, sawContinued, sawResult bool
+	for ev := range newStream.Events() {
+		switch ev.Type {
+		case v1.EventSystem:
+			if ev.InterruptMode != "" {
+				sawNative = true
+				if ev.InterruptMode != v1.InterruptModeNative {
+					t.Fatalf("interrupt_mode = %q, want %q", ev.InterruptMode, v1.InterruptModeNative)
+				}
+				if ev.InterruptedTurnID != oldTurn {
+					t.Fatalf("interrupted_turn_id = %q, want %q", ev.InterruptedTurnID, oldTurn)
+				}
+			}
+		case v1.EventText:
+			if ev.Text == "native-continued" {
+				sawContinued = true
+			}
+		case v1.EventResult:
+			sawResult = true
+		}
+	}
+	if !sawNative || !sawContinued || !sawResult {
+		t.Fatalf("native stream incomplete: native=%v continued=%v result=%v",
+			sawNative, sawContinued, sawResult)
+	}
+	if newStream.TurnID() == "" || newStream.TurnID() == oldTurn {
+		t.Fatalf("new turn id = %q, old = %q", newStream.TurnID(), oldTurn)
+	}
+
+	// Drain the old subscriber so the goroutine exits cleanly.
+	for range oldEvents {
+	}
+
+	if agent.creates.Load() != 1 {
+		t.Fatalf("creates = %d, want 1 (no new process)", agent.creates.Load())
+	}
+
+	info, err := client.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if info.Status != codingagent.StatusCompleted {
+		t.Fatalf("status = %q, want completed", info.Status)
+	}
+}
+
+func TestTurnInterrupt_BuiltinAgentsDeclareNoNativeResume(t *testing.T) {
+	baseURL, cleanup := startHeartbeatCancelLiveServer(t)
+	defer cleanup()
+
+	resp, err := http.Get(baseURL + "/api/v1/agents")
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var agents []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(agents) == 0 {
+		t.Fatal("no agents listed")
+	}
+	sawWayfinder := false
+	for _, a := range agents {
+		name, _ := a["name"].(string)
+		if name == "wayfinder" {
+			sawWayfinder = true
+		}
+		val, present := a["supports_interrupt_resume"]
+		if !present {
+			t.Fatalf("agent %q missing supports_interrupt_resume key: %v", name, a)
+		}
+		if val != false {
+			t.Fatalf("agent %q supports_interrupt_resume = %v, want false", name, val)
+		}
+	}
+	if !sawWayfinder {
+		t.Fatalf("wayfinder not listed: %v", agents)
+	}
+}
+
 // startInterruptAndReadFirstTurn posts an interrupt as SSE, reads events until a
 // turn_id appears (the replan turn's opening system event), then closes the body.
 func startInterruptAndReadFirstTurn(t *testing.T, ts *httptest.Server, sessionID, content string) string {
