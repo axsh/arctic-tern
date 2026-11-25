@@ -64,18 +64,19 @@ Performs a health check, retrieves the cached LLM Gateway Proxy (LLMGP) status, 
 
 ### 2. List Agents
 
-Retrieves the names of all available coding agents.
+Retrieves the names of all available coding agents and whether each one supports native interrupt resume.
 
 - **Method**: `GET`
 - **Path**: `/api/v1/agents`
 - **Response (200 OK)**:
   ```json
   [
-    {"name": "claudecode"},
-    {"name": "codex"},
-    {"name": "wayfinder"}
+    {"name": "claudecode", "supports_interrupt_resume": false},
+    {"name": "codex", "supports_interrupt_resume": false},
+    {"name": "wayfinder", "supports_interrupt_resume": false}
   ]
   ```
+- `supports_interrupt_resume` is `true` only for agents that declare native interrupt resume (see §9.1 Modes). All current built-in agents are `false`, so `Interrupt` runs in `fallback` mode for them. The field is always present, including when `false`.
 
 ---
 
@@ -536,12 +537,19 @@ Aborts the current turn (cancels execution context, best-effort stops the agent 
 
 ### 9.1 Interrupt In-Flight Turn
 
-Interrupts the in-flight turn and immediately starts a new turn on the **same session id** that reconciles the user's new instruction with the progress observed so far. In the MVP the interrupt always runs in **`fallback`** mode (`native` resume is a future extension). Fallback replan:
+Interrupts the in-flight turn and immediately starts a new turn on the **same session id** that reconciles the user's new instruction with the progress observed so far.
+
+- **Modes**:
+  - `native`: used when the agent declares native interrupt resume (`supports_interrupt_resume: true` in List Agents) and the running session implements it. Tern stops the old turn for its subscribers, hands the instruction to the running agent **without restarting the process**, and streams the continuation as a new turn (new `turn_id`). The continued turn does not retry or self-heal; a retryable error terminates it as a classified error. The agent's own process and execution context move from the old turn to the new one.
+  - `fallback`: used for every other case, or when `native` is rejected/fails. Tern stops the in-flight turn and starts a fresh turn whose prompt opens with a `Tern turn interrupt` header, a progress summary of the stopped turn, and the user's instruction last. A native-to-fallback switch happens within the same request and is logged with `native interrupt failed; falling back`.
+  - All current built-in agents are `fallback`-only. Either way, the old turn's terminal `turn interrupted` is emitted exactly once.
+
+Common to both modes, the interrupt:
 
 1. stops the in-flight turn (same immediate stop as `cancel`, but the session is **not** set to `closed`);
 2. ingests the stopped turn's partial assistant text and tool calls into canonical history (best effort);
 3. appends a canonical `user` record describing the interrupt (see below);
-4. starts a new turn whose prompt opens with a `Tern turn interrupt` header, a progress summary of the stopped turn, and the user's instruction last;
+4. starts a new turn (fallback builds a replan prompt; native hands the raw instruction to the agent);
 5. keeps the native conversation id so the agent resumes its own thread where supported.
 
 - **Method**: `POST`

@@ -178,6 +178,8 @@ stream.Output(os.Stdout)
 
 Use `Respond` to answer a `user_input_required` prompt, `Interrupt` to change the plan mid-turn (keeps partial progress in canonical history and starts a new turn), and `CancelTurn` to simply stop the turn without starting a new one. All three keep the session open; only `Terminate` closes it.
 
+`client.ListAgents` reports `SupportsInterruptResume` for each agent, which tells you whether `Interrupt` resumes natively inside the running agent; even when it is `false`, `Interrupt` still works via Tern's fallback replan.
+
 While a tool runs with no agent stdout, Tern emits SSE `progress` events with `content: "tool_still_running"` (default every 30s) so clients can treat the stream as alive. See [docs/reference-manual-web-apis.md](reference-manual-web-apis.md).
 
 ### Multimodal Messages and Context

@@ -24,6 +24,7 @@ This is the current phase.
 * [ ] Gemini CLI adapter (replaced by Antigravity SDK?)
 * [ ] Interactive agent execution (`user_input_required`, `respond`, `suspended`)
 * [x] Turn interrupt (interrupt API, fallback replan)
+* [ ] Native interrupt resume adapters (Codex / Claude Code / Wayfinder)
 * [ ] Agent interaction protocol (SSE reconnect, advanced orchestration)
 * [ ] MCP support
 * [ ] Tern CLI
