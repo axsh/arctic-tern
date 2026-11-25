@@ -41,18 +41,8 @@ func (s *Server) stopInFlightTurn(ctx context.Context, exec *activeExecution, op
 	if exec.agentSess != nil {
 		_ = exec.agentSess.Close()
 	}
-	// 5. Append an explicit terminal for subscribers and finalize usage once.
-	if opts.terminal != nil && exec.relay != nil {
-		ev := *opts.terminal
-		ev.TurnID = exec.turnID
-		ev.CorrelationID = exec.correlationID
-		exec.relay.appendEvent(ev)
-		s.applyUsageSideEffects(exec.sessionID, exec, &ev)
-	}
-	// 6. Let subscribers drain to completion.
-	if exec.relay != nil {
-		exec.relay.markSourceDone()
-	}
+	// 5-6. Append an explicit terminal (at most once) and let subscribers drain.
+	s.finishTurnRelay(exec, opts.terminal)
 	// 7. Reconcile while the relay is still registered (turn_files flush reads it).
 	if s.artifactStore != nil {
 		s.reconcileSessionArtifacts(ctx, exec.sessionID, exec.turnID, exec.correlationID)
@@ -68,6 +58,51 @@ func (s *Server) stopInFlightTurn(ctx context.Context, exec *activeExecution, op
 	s.UnregisterActiveSession(exec.sessionID)
 	s.UnregisterExecCancel(exec.sessionID)
 	// 11. Return the stopped turn's relay snapshot.
+	return events
+}
+
+// finishTurnRelay ends exec's relay for its subscribers: it appends terminal at most
+// once (with turn/correlation ids and the turn's usage finalized) and marks the source
+// done. A nil terminal only marks the source done. Safe to call more than once; the
+// terminal is appended only on the first call (guarded by stopMu via terminalAppended).
+func (s *Server) finishTurnRelay(exec *activeExecution, terminal *codingagent.StreamEvent) {
+	if exec == nil {
+		return
+	}
+	if terminal != nil && exec.relay != nil {
+		exec.stopMu.Lock()
+		first := !exec.terminalAppended
+		exec.terminalAppended = true
+		exec.stopMu.Unlock()
+		if first {
+			ev := *terminal
+			ev.TurnID = exec.turnID
+			ev.CorrelationID = exec.correlationID
+			exec.relay.appendEvent(ev)
+			s.applyUsageSideEffects(exec.sessionID, exec, &ev)
+		}
+	}
+	if exec.relay != nil {
+		exec.relay.markSourceDone()
+	}
+}
+
+// detachInterruptedTurn finalizes a turn whose agent process continues under a new
+// turn (native interrupt): it reconciles and ingests the old turn and unregisters it
+// from the exec registry, but keeps the process, its cancel func and its active-session
+// entry for the successor. The caller must hold the session turn gate and have marked
+// exec stopped (and already finished its relay). Returns the stopped turn's snapshot.
+func (s *Server) detachInterruptedTurn(ctx context.Context, exec *activeExecution) []codingagent.StreamEvent {
+	if exec == nil {
+		return nil
+	}
+	exec.stopReattachTimer()
+	if s.artifactStore != nil {
+		s.reconcileSessionArtifacts(ctx, exec.sessionID, exec.turnID, exec.correlationID)
+	}
+	events := exec.relay.snapshot()
+	s.ingestTurnEvents(exec.sessionID, events)
+	s.execRegistry.UnregisterIf(exec.sessionID, exec)
 	return events
 }
 

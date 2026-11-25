@@ -341,6 +341,8 @@ func (s *Server) runTurn(
 				relay:         relay,
 				status:        codingagent.StatusActive,
 				usageAgg:      newTurnUsageAggregator(turnID),
+				execCtx:       execCtx,
+				execCancel:    execCancel,
 			}
 			if err := s.execRegistry.Register(sessionID, active); err != nil {
 				finish()

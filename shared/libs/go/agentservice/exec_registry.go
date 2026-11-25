@@ -50,8 +50,12 @@ type activeExecution struct {
 	subscriberGen int
 	reattachTimer *time.Timer
 
-	stopMu     sync.Mutex
-	stopReason string
+	execCtx    context.Context    // agent process lifetime; transferred on native interrupt
+	execCancel context.CancelFunc // cancels execCtx; transferred on native interrupt
+
+	stopMu           sync.Mutex
+	stopReason       string
+	terminalAppended bool // guarded by stopMu; ensures the turn's terminal is appended at most once
 }
 
 // markStopped records why exec was stopped. It returns false when exec was already stopped.
