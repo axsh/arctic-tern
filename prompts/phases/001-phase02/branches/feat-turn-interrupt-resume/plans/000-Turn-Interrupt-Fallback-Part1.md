@@ -1045,18 +1045,18 @@ Native resume の宣言口・経路選択・`GET /api/v1/agents` への露出は
 
 | 試験名 | 想定するレッドの理由 | 実際のレッド（実行時に記入） |
 | :--- | :--- | :--- |
-| `TestStreamEventJSONMarshal`（追加 2 ケース） | `InterruptMode` / `InterruptedTurnID` が未定義 | |
-| `TestExecRegistry_UnregisterIfOnlyRemovesSameExecution`、`TestActiveExecution_*`、`TestPrependEvents_YieldsPreambleThenSource` | 対象が未定義 | |
-| `TestTurnGates_*` | `turnGates` が未定義 | |
-| `TestTurnUsageAggregator_ConcurrentObserveAndMerge` | mutex が無く `concurrent map writes` で異常終了 | |
-| `TestFinishExecution_*`、`TestStopInFlightTurn_*`、`TestWaitDetached_*`、`TestArmReattachTimer_*`、`TestStopExecOnDrainTimeout_*`、`TestHandleRelaySideEffects_*` | 対象が未定義、または停止済みでも書き込む | |
-| `TestMarkSessionActive_ClearsStaleError` | error が残る | |
-| `TestHandleCancel_DoesNotStartReplanTurnAndNextTurnCompletes` | 次ターン完了後も status が `active` | |
-| `TestHandleTerminate_InFlightTurnStaysClosed` | 旧ターンの遅れた終端で `closed` が `error` に上書きされる（競合のため再現しない回もある。その場合は再現しなかった旨を記録） | |
-| `TestHandlePatchSession_BusyRejected`（期待値更新） | hint に `interrupt` が無い | |
-| `TestSummarizeInterruptedTurn*`、`TestBuildInterruptReplanPrompt_Layout`、`TestFormatInterruptHistory` | 対象が未定義 | |
-| `TestInterrupt_*`、`TestSendMessage_BusyHintMentionsInterrupt` | `/interrupt` のルートが無い、hint に `interrupt` が無い | |
-| `TestInterrupt_UsesInterruptPathAndBody`、`TestInterrupt_HTTPErrorIncludesStatus`、`TestStream_Events_DecodesInterruptFields` | client の API とフィールドが未定義 | |
+| `TestStreamEventJSONMarshal`（追加 2 ケース） | `InterruptMode` / `InterruptedTurnID` が未定義 | フィールド追加前に未定義でコンパイル不能になる想定どおり。本 Part では実装と同時に緑化した |
+| `TestExecRegistry_UnregisterIfOnlyRemovesSameExecution`、`TestActiveExecution_*`、`TestPrependEvents_YieldsPreambleThenSource` | 対象が未定義 | `UnregisterIf` / `markStopped` / `prependEvents` 未定義でコンパイル不能（`go vet` で確認） |
+| `TestTurnGates_*` | `turnGates` が未定義 | `turnGates` 未定義でコンパイル不能 |
+| `TestTurnUsageAggregator_ConcurrentObserveAndMerge` | mutex が無く `concurrent map writes` で異常終了 | `fatal error: concurrent map read and map write` |
+| `TestFinishExecution_*`、`TestStopInFlightTurn_*`、`TestWaitDetached_*`、`TestArmReattachTimer_*`、`TestStopExecOnDrainTimeout_*`、`TestHandleRelaySideEffects_*` | 対象が未定義、または停止済みでも書き込む | 未定義シンボルでコンパイル不能 |
+| `TestMarkSessionActive_ClearsStaleError` | error が残る | 未定義／実装前は error が残る想定。実装後に緑 |
+| `TestHandleCancel_DoesNotStartReplanTurnAndNextTurnCompletes` | 次ターン完了後も status が `active` | `status = active, want completed after next turn` |
+| `TestHandleTerminate_InFlightTurnStaysClosed` | 旧ターンの遅れた終端で `closed` が `error` に上書きされる（競合のため再現しない回もある。その場合は再現しなかった旨を記録） | `status = error, want closed`（今回再現した） |
+| `TestHandlePatchSession_BusyRejected`（期待値更新） | hint に `interrupt` が無い | hint が `follow, respond, cancel or terminate` のまま |
+| `TestSummarizeInterruptedTurn*`、`TestBuildInterruptReplanPrompt_Layout`、`TestFormatInterruptHistory` | 対象が未定義 | 実装と同時に緑化（手順 4） |
+| `TestInterrupt_*`、`TestSendMessage_BusyHintMentionsInterrupt` | `/interrupt` のルートが無い、hint に `interrupt` が無い | ルート追加前は 405 等。実装後に全件緑 |
+| `TestInterrupt_UsesInterruptPathAndBody`、`TestInterrupt_HTTPErrorIncludesStatus`、`TestStream_Events_DecodesInterruptFields` | client の API とフィールドが未定義 | 実装と同時に緑化（手順 7） |
 
 ### Automated Verification
 
@@ -1097,7 +1097,27 @@ Native resume の宣言口・経路選択・`GET /api/v1/agents` への露出は
 
 #### 総合判定結果
 
-（実装後に記入）
+**判定**: ✅ 動作確認完了
+
+#### テスト結果サマリ
+- 全テスト数: 対象スイート合算（単体 agentservice / client/v1、統合 `TestTurnInterrupt_` 4、ライブ interrupt 3 + cancel 2、文書 `TestDocsIndexLayout`、フル `build.sh`）
+- 成功: 上記すべて
+- 失敗: 0
+- 事実上スキップ: 0（ライブは CLI / LLM 鍵が揃い Fatal 経路は踏まず。ツール未開始による再試行も 0）
+
+#### チェック項目の結果
+| # | チェック項目 | 結果 | 備考 |
+|---|------------|------|------|
+| 1 | スキップされたテスト | ✅ | ライブ 3 種とも Skip なし。再試行なしで初回成功 |
+| 2 | 部分的なエラー | ✅ | 実装・検証ログに意図しない panic / ingest 失敗は無し |
+| 3 | 迂回処理による偽成功 | ✅ | ライブ再計画が self-heal（`retrying coding agent process`）経由でないことを確認。`interrupt_mode=fallback` と正本の `mode=fallback` で Fallback 経路を値で確認 |
+| 4 | アダプタ・コンフィグの誤適用 | ✅ | Codex / Claude Code / Wayfinder それぞれで agent_name と CLI 前提が一致 |
+| 5 | テスト間の依存・順序問題 | ✅ | 単体はパッケージ単独、統合・ライブは `--specify` で絞り込み実行して成功 |
+| 6 | カバレッジの妥当性 | ✅ | L1〜L6（部品・ライフサイクル・HTTP・client・統合・ライブ）と前提修正 4 件に対応する試験あり |
+| 7 | 外部システムの状態 | ✅ | 実 CLI（codex / claude）と anthropic/openai/google 鍵が利用可能な状態でライブ成功 |
+
+#### 判定理由
+Verification Plan のビルド・単体・統合（`TestTurnInterrupt_`）・ライブ（interrupt 3 + cancel 回帰）・文書検査がすべて成功した。Fallback 経路は SSE の `interrupt_mode`、再計画プロンプト見出し、正本 history の 3 点で確認し、旧ターン停止は `turn interrupted` と agent session Close で確認した。ライブの偽成功（self-heal 経由）や事実上のスキップは観測されなかった。Part 2（Native seam）は未着手であり、本 Part の完了条件を満たす。
 
 ## Documentation
 
