@@ -45,7 +45,12 @@ type StreamEvent struct {
 	ChunkID       string                 `json:"chunk_id,omitempty"`
 	ChunkIndex    int                    `json:"index,omitempty"`
 	ChunkTotal    int                    `json:"total,omitempty"`
-	Usage         *TokenUsage            `json:"usage,omitempty"`
-	Error         error                  `json:"-"`
-	Retryable     bool                   `json:"-"`
+	Usage *TokenUsage `json:"usage,omitempty"`
+	// InterruptMode is set on the system event that opens a turn started by
+	// POST /interrupt ("fallback" or "native").
+	InterruptMode string `json:"interrupt_mode,omitempty"`
+	// InterruptedTurnID is the turn_id that the interrupt stopped.
+	InterruptedTurnID string `json:"interrupted_turn_id,omitempty"`
+	Error             error  `json:"-"`
+	Retryable         bool   `json:"-"`
 }

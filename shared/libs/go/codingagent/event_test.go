@@ -109,6 +109,34 @@ func TestStreamEventJSONMarshal(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "interrupt system event carries mode and interrupted turn",
+			event: codingagent.StreamEvent{
+				Type:              codingagent.EventSystem,
+				Content:           "turn interrupt",
+				InterruptMode:     "fallback",
+				InterruptedTurnID: "t-old",
+			},
+			checks: func(t *testing.T, data map[string]any) {
+				if data["interrupt_mode"] != "fallback" {
+					t.Errorf("interrupt_mode = %v", data["interrupt_mode"])
+				}
+				if data["interrupted_turn_id"] != "t-old" {
+					t.Errorf("interrupted_turn_id = %v", data["interrupted_turn_id"])
+				}
+			},
+		},
+		{
+			name:  "interrupt fields are omitted when empty",
+			event: codingagent.StreamEvent{Type: codingagent.EventText, Content: "x"},
+			checks: func(t *testing.T, data map[string]any) {
+				for _, k := range []string{"interrupt_mode", "interrupted_turn_id"} {
+					if _, ok := data[k]; ok {
+						t.Errorf("%s must be omitted", k)
+					}
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
