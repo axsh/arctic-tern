@@ -544,6 +544,8 @@ func (s *Server) routeSessionByID(w http.ResponseWriter, r *http.Request) {
 		s.handleTerminate(w, r)
 	} else if strings.HasSuffix(path, "/cancel") {
 		s.handleCancel(w, r)
+	} else if strings.HasSuffix(path, "/interrupt") {
+		s.handleInterrupt(w, r)
 	} else if strings.HasSuffix(path, "/logs") {
 		s.handleLogStream(w, r)
 	} else if strings.HasSuffix(path, "/events") {

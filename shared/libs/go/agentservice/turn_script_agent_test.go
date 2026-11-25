@@ -187,12 +187,13 @@ func createScriptSession(t *testing.T, ts *httptest.Server) (sessionID, sessionD
 }
 
 type sseCapture struct {
-	done   chan struct{}
-	mu     sync.Mutex
-	events []map[string]any
-	sawDone bool
-	status int
-	raw    string
+	done        chan struct{}
+	statusReady chan struct{}
+	mu          sync.Mutex
+	events      []map[string]any
+	sawDone     bool
+	status      int
+	raw         string
 }
 
 func startSSE(t *testing.T, ts *httptest.Server, path string, body any) *sseCapture {
@@ -204,14 +205,21 @@ func startSSE(t *testing.T, ts *httptest.Server, path string, body any) *sseCapt
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("sse request: %v", err)
-	}
-	c := &sseCapture{done: make(chan struct{})}
-	c.status = resp.StatusCode
+	c := &sseCapture{done: make(chan struct{}), statusReady: make(chan struct{})}
 	go func() {
 		defer close(c.done)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			c.mu.Lock()
+			c.raw = "request error: " + err.Error()
+			c.mu.Unlock()
+			close(c.statusReady)
+			return
+		}
+		c.mu.Lock()
+		c.status = resp.StatusCode
+		c.mu.Unlock()
+		close(c.statusReady)
 		defer resp.Body.Close()
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -240,6 +248,18 @@ func startSSE(t *testing.T, ts *httptest.Server, path string, body any) *sseCapt
 		}
 	}()
 	return c
+}
+
+func (c *sseCapture) waitStatus(t *testing.T, timeout time.Duration) int {
+	t.Helper()
+	select {
+	case <-c.statusReady:
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for SSE response headers; raw=%s", c.raw)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.status
 }
 
 func (c *sseCapture) waitFor(t *testing.T, pred func(ev map[string]any) bool, timeout time.Duration) {

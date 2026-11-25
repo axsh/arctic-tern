@@ -327,7 +327,38 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	turnID := s.generateID()
+	s.launchTurn(w, r, record, turnLaunch{
+		content:       req.Content,
+		correlationID: req.CorrelationID,
+		supplement:    req.Supplement,
+		onRegistered:  release,
+	})
+}
+
+// turnLaunch carries the inputs of one turn started by POST /messages or POST /interrupt.
+type turnLaunch struct {
+	turnID        string                      // optional; generated when empty
+	content       []codingagent.ContentPart   // validated request content (POST /messages)
+	agentPrompt   string                      // interrupt: sent instead of the prompt built from content; the caller already appended canonical history
+	correlationID string
+	supplement    *session.SupplementStrategy
+	preamble      []codingagent.StreamEvent // emitted at the head of the new turn's relay
+	onRegistered  func()                    // idempotent; called once the execution is registered or the launch fails
+}
+
+// launchTurn starts a turn for the given session record. Messages and interrupt share this path.
+func (s *Server) launchTurn(w http.ResponseWriter, r *http.Request, record *codingagent.SessionRecord, l turnLaunch) {
+	release := l.onRegistered
+	if release == nil {
+		release = func() {}
+	}
+	defer release()
+
+	sessionID := record.ID
+	turnID := l.turnID
+	if turnID == "" {
+		turnID = s.generateID()
+	}
 	if s.logger != nil {
 		s.logger.Debug("turn initialized", "session_id", sessionID, "turn_id", turnID)
 	}
@@ -339,34 +370,68 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check multimodal support if non-text content is present.
-	hasMultimodal := codingagent.HasNonTextContent(req.Content)
-	if hasMultimodal {
-		if supporter, ok := agent.(MultimodalSupporter); ok {
-			if !supporter.SupportsMultimodal() {
-				http.Error(w, codingagent.ErrMultimodalNotSupported.Error(), http.StatusNotImplemented)
-				return
-			}
-		}
-	}
-
-	// Build the prompt string from content parts.
 	var promptText string
 	var savedFiles []string
+	appendHistory := l.agentPrompt == ""
 
-	if hasMultimodal {
-		// Use temporary multimodal prompt builder (does not persist to session dir).
-		var err error
-		promptText, savedFiles, err = BuildMultimodalPrompt(sessionID, req.Content)
-		if err != nil {
-			if s.logger != nil {
-				s.logger.Error("failed to build multimodal prompt", "error", err.Error(), "session_id", sessionID)
-			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	if l.agentPrompt != "" {
+		promptText = l.agentPrompt
 	} else {
-		promptText = codingagent.ExtractText(req.Content)
+		hasMultimodal := codingagent.HasNonTextContent(l.content)
+		if hasMultimodal {
+			if supporter, ok := agent.(MultimodalSupporter); ok {
+				if !supporter.SupportsMultimodal() {
+					http.Error(w, codingagent.ErrMultimodalNotSupported.Error(), http.StatusNotImplemented)
+					return
+				}
+			}
+		}
+
+		if hasMultimodal {
+			var err error
+			promptText, savedFiles, err = BuildMultimodalPrompt(sessionID, l.content)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Error("failed to build multimodal prompt", "error", err.Error(), "session_id", sessionID)
+				}
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		} else {
+			promptText = codingagent.ExtractText(l.content)
+		}
+
+		// Append user message to persistent session history (text parts only to keep it stateless).
+		var sessionParts []session.ContentPart
+		for _, p := range l.content {
+			if p.Type == "text" {
+				sessionParts = append(sessionParts, session.ContentPart{
+					Type: "text",
+					Text: p.Text,
+				})
+			} else if p.Type == "image" {
+				sessionParts = append(sessionParts, session.ContentPart{
+					Type: "image",
+					Image: &session.ImageMetadata{
+						MediaType: p.Source.MediaType,
+						Path:      "",
+					},
+				})
+			}
+		}
+		userContent := promptText
+		if !hasMultimodal {
+			userContent = codingagent.ExtractText(l.content)
+		}
+		if appendHistory {
+			AppendSessionMessage(record.SessionDir, session.Message{
+				Role:         "user",
+				Content:      userContent,
+				ContentParts: sessionParts,
+				Timestamp:    time.Now(),
+				Origin:       record.AgentName,
+			})
+		}
 	}
 
 	// Validate prompt size against configured limit.
@@ -381,40 +446,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Append user message to persistent session history (text parts only to keep it stateless).
-	var sessionParts []session.ContentPart
-	for _, p := range req.Content {
-		if p.Type == "text" {
-			sessionParts = append(sessionParts, session.ContentPart{
-				Type: "text",
-				Text: p.Text,
-			})
-		} else if p.Type == "image" {
-			// Record image presence without the binary data or path.
-			sessionParts = append(sessionParts, session.ContentPart{
-				Type: "image",
-				Image: &session.ImageMetadata{
-					MediaType: p.Source.MediaType,
-					Path:      "", // No persistent path in stateless mode
-				},
-			})
-		}
-	}
-	userContent := promptText
-	if !hasMultimodal {
-		userContent = codingagent.ExtractText(req.Content)
-	}
-	AppendSessionMessage(record.SessionDir, session.Message{
-		Role:         "user",
-		Content:      userContent,
-		ContentParts: sessionParts,
-		Timestamp:    time.Now(),
-		Origin:       record.AgentName,
-	})
-
 	resumeID := record.AgentSessionID
 	rawUserPrompt := promptText
-	wrapped, wrapErr := s.wrapPromptWithSupplement(r.Context(), record, promptText, req.Supplement)
+	wrapped, wrapErr := s.wrapPromptWithSupplement(r.Context(), record, promptText, l.supplement)
 	if wrapErr != nil {
 		http.Error(w, wrapErr.Error(), wrapHTTPStatus(wrapErr))
 		return
@@ -462,7 +496,10 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	execCtx, execCancel := context.WithCancel(context.Background())
 	s.RegisterExecCancel(sessionID, execCancel)
-	s.runTurn(r, w, execCtx, execCancel, record, sessionID, turnID, req.CorrelationID, promptText, rawUserPrompt, resumeID, opts, savedFiles, runTurnHooks{onRegistered: release})
+	s.runTurn(r, w, execCtx, execCancel, record, sessionID, turnID, l.correlationID, promptText, rawUserPrompt, resumeID, opts, savedFiles, runTurnHooks{
+		preamble:     l.preamble,
+		onRegistered: release,
+	})
 }
 
 // finishExecution closes exec's agent session and releases the busy-state registries,
