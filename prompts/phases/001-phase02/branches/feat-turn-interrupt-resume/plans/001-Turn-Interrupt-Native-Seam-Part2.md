@@ -432,14 +432,14 @@ None.
 
 | 試験名 | 想定するレッドの理由 | 実際のレッド（実行時に記入） |
 | :--- | :--- | :--- |
-| `TestInterruptInterfacesAreImplementable` | インタフェースが未定義 | |
-| `TestHandleListAgents_ReportsInterruptResume`、`TestListAgents_DecodesInterruptResume` | `supports_interrupt_resume` が出ない・復号されない | |
-| `TestSelectInterruptMode`、`TestFinishTurnRelay_AppendsTerminalOnce`、`TestDetachInterruptedTurn_KeepsProcessOwnership` | 対象が未定義 | |
-| `TestInterrupt_NativeContinuesInSameAgentSession`、`TestInterrupt_NativeTurnCancelStopsTransferredContext` | Native が選ばれず `interrupt_mode=fallback`、`creates == 2` | |
-| `TestInterrupt_NativeFailureFallsBackInSameRequest` | `InterruptTurn` が呼ばれない（`interruptCalls == 0`） | |
-| `TestInterrupt_CapabilityFalseNeverCallsNativeHook`、`TestInterrupt_SessionWithoutHookUsesFallback` | Part 1 の時点で緑になりうる（Native が無いため）。緑でも記録し、Part 2 実装後も緑のままであることを確かめる | |
-| `TestTurnInterrupt_ClientV1NativeStub` | `interrupt_mode=fallback` | |
-| `TestTurnInterrupt_BuiltinAgentsDeclareNoNativeResume` | フィールドが無い | |
+| `TestInterruptInterfacesAreImplementable` | インタフェースが未定義 | `go test ./shared/libs/go/codingagent/` がビルド失敗。`interface_test.go:21: undefined: codingagent.InterruptResumeSupporter`、`interface_test.go:25: undefined: codingagent.TurnInterrupter`。 |
+| `TestHandleListAgents_ReportsInterruptResume`、`TestListAgents_DecodesInterruptResume` | `supports_interrupt_resume` が出ない・復号されない | ListAgents: `--- FAIL: TestHandleListAgents_ReportsInterruptResume` `codex supports_interrupt_resume = <nil>, want true`（フィールド未出力）。client: ビルド失敗 `byName["codex"].SupportsInterruptResume undefined (type Agent has no field or method SupportsInterruptResume)`。 |
+| `TestSelectInterruptMode`、`TestFinishTurnRelay_AppendsTerminalOnce`、`TestDetachInterruptedTurn_KeepsProcessOwnership` | 対象が未定義 | `agentservice` テストバイナリがビルド失敗。`interrupt_native_internal_test.go:64: assignment mismatch: 2 variables but s.selectInterruptMode returns 1 value`、`:84/:85: s.finishTurnRelay undefined`、`:154/:155: unknown field execCtx/execCancel in struct literal of type activeExecution`、`:163: s.detachInterruptedTurn undefined`。 |
+| `TestInterrupt_NativeContinuesInSameAgentSession`、`TestInterrupt_NativeTurnCancelStopsTransferredContext` | Native が選ばれず `interrupt_mode=fallback`、`creates == 2` | 同上の `agentservice` テストバイナリのビルド失敗（内部テストの未定義シンボル）により、実装前は実行不可＝レッド。Native 経路（`serveNativeInterrupt`/`selectInterruptMode` の 2 値返し）未実装のため緑化不能。 |
+| `TestInterrupt_NativeFailureFallsBackInSameRequest` | `InterruptTurn` が呼ばれない（`interruptCalls == 0`） | 同上のビルド失敗により実装前は実行不可＝レッド（`serveNativeInterrupt` 未実装のため Native→Fallback 切替が存在しない）。 |
+| `TestInterrupt_CapabilityFalseNeverCallsNativeHook`、`TestInterrupt_SessionWithoutHookUsesFallback` | Part 1 の時点で緑になりうる（Native が無いため）。緑でも記録し、Part 2 実装後も緑のままであることを確かめる | 同じ `agentservice` テストバイナリが内部テストの未定義シンボルでビルド失敗していたため、実装前は実行不可＝レッド。Step 4 実装後は緑（`creates == 2`、`interrupt_mode=fallback`、`interruptCalls == 0`）。 |
+| `TestTurnInterrupt_ClientV1NativeStub` | `interrupt_mode=fallback` | Step 4 実装前は `selectInterruptMode` が常に fallback を返すため `interrupt_mode=fallback` となり、`InterruptMode == v1.InterruptModeNative` の断言で失敗（レッド）。実装後は緑。 |
+| `TestTurnInterrupt_BuiltinAgentsDeclareNoNativeResume` | フィールドが無い | Step 2 実装前は `GET /api/v1/agents` に `supports_interrupt_resume` キーが無いため `agent %q missing supports_interrupt_resume key` で失敗（レッド）。実装後は緑（全エージェント `false`、`wayfinder` 掲載）。 |
 
 ### Automated Verification
 
@@ -474,7 +474,28 @@ None.
 
 #### 総合判定結果
 
-（実装後に記入）
+**判定**: ✅ 動作確認完了
+
+##### テスト結果サマリ
+- Build & Unit（`./scripts/process/build.sh`）: PASS（全 Go 単体テスト・画面・例のビルド）。Part 2 の L1 単体（`TestInterruptInterfacesAreImplementable`・`TestSelectInterruptMode`・`TestFinishTurnRelay_AppendsTerminalOnce`・`TestDetachInterruptedTurn_KeepsProcessOwnership`）と L2 HTTP（`TestInterrupt_Native*`・`TestInterrupt_CapabilityFalseNeverCallsNativeHook`・`TestInterrupt_SessionWithoutHookUsesFallback`・`TestHandleListAgents_ReportsInterruptResume`）、L3 client（`TestListAgents_DecodesInterruptResume`）を含む。
+- 統合（`--specify 'TestTurnInterrupt_'`）: 6 件 PASS（`TestTurnInterrupt_ClientV1NativeStub`・`TestTurnInterrupt_BuiltinAgentsDeclareNoNativeResume` を含む）。
+- 回帰（Part 1 範囲 `TestSessionFollow_|TestInteractive_|TestSessionRecover_|TestReconcile_|TestFileChangeCollectors_|TestIntegration_|TestStreamReconnect_`）: `TestInteractive_UserInputRequired_MockAdapter` の 1 件が失敗。ただし本失敗は Part 2 着手前のコミット `09c6ad9`（Part 1 の HEAD）でも同一に再現する**既存の失敗**であり、本 Part の変更とは無関係（SSE 先頭の `turn context` メタイベントで索引がずれる試験側の前提ずれ）。他はすべて PASS。
+- ライブ E2E（`--specify 'TestLiveTurnInterrupt_'`、実 CLI＋LLM 認証あり）: 全 PASS。ログで組み込みエージェント（codex / claude / wayfinder）の `interrupt_mode=fallback` を確認。
+- 文書・例（`--specify 'TestDocsIndexLayout|TestExamples_'`）: PASS。
+
+##### チェック項目の結果
+| # | チェック項目 | 結果 | 備考 |
+|---|------------|------|------|
+| 1 | スキップされたテスト | ✅ | `t.Skip` は無し。前提未達は Fatal で扱う。 |
+| 2 | 部分的なエラー | ✅ | ライブ回帰の `ERROR LLM call failed ... context canceled` は割り込みで旧ターンの LLM 呼を止めた正常な事象。`WARN token usage missing` は usage を出さないスタブ由来で成功判定に影響しない。 |
+| 3 | 迂回処理による偽成功 | ✅ | Native 成功は `creates == 1`（プロセス再生成なし）かつ `interruptCalls == 1` かつ `interrupt_mode=native` の組で確認。Fallback は `creates == 2` かつ再計画プロンプト見出し（`InterruptPromptHeader`）で確認。 |
+| 4 | アダプタ・コンフィグの誤適用 | ✅ | 実登録エージェントは全て `supports_interrupt_resume=false`（`TestTurnInterrupt_BuiltinAgentsDeclareNoNativeResume`）。ライブ `interrupt_mode` は全て `fallback`。 |
+| 5 | テスト間の依存・順序 | ✅ | 単独実行（`-run`）でも各試験が同結果。 |
+| 6 | カバレッジの妥当性 | ✅ | 経路選択 5 通り、Native 成功・失敗・不選択（能力 false／実行口なし）・移譲後 cancel、能力の一覧、client 復号、統合の 7 観点を網羅。 |
+| 7 | 外部システムの状態 | ✅ | ライブは実 CLI＋LLM 認証済み。実サーバ起動時は artifact store を Shutdown で確実に close（本 Part で defer 化）。 |
+
+##### 判定理由
+Part 2 の宣言（`InterruptResumeSupporter`）・公開（`supports_interrupt_resume`）・経路選択（`selectInterruptMode`）・Native 実行（`serveNativeInterrupt`・`finishTurnRelay`・`detachInterruptedTurn`・`execCtx` 移譲）・Native 失敗からの同一要求内 Fallback・後片付け（`creates`/`closes`/`closesAtInterrupt`・移譲コンテキストの cancel）を、値で確かめる単体・HTTP・client・統合・ライブの各段でグリーンにした。唯一の失敗 `TestInteractive_UserInputRequired_MockAdapter` は Part 1 の HEAD（`09c6ad9`）でも同一に再現する既存の失敗で、本 Part のスコープ外である（worktree で確認済み）。以上より本 Part の実装は実際に動作していると判断する。なお `-race` では Part 1 由来の既存データ競合（`updateSessionStatusOnTerminal` と `ingestTurnEvents` の並行）が `TestInterrupt_FallbackReplacesInFlightTurn` を含む複数で検出されるが、`build.sh` は `-race` を使わず、本 Part の新規コードが導入したものではない（Part 1 の HEAD でも同一に再現）。
 
 ## Documentation
 
