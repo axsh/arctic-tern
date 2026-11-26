@@ -93,3 +93,15 @@ providers:
               tool_call_fallback: true  # Text-to-tool-call conversion for local LLMs
     network_config:
       base_url: "http://localhost:11434"  # For remote: "http://remote-host:11434"
+
+coding_agents:
+  codex:
+    max_prompt_bytes: 1048576
+    max_execution_seconds: 3600
+    idle_timeout_seconds: 300
+    execution_mode: single_shot
+  claudecode:
+    max_execution_seconds: 3600
+    idle_timeout_seconds: 300
+    execution_mode: single_shot
+
