@@ -95,11 +95,11 @@ func ResolveVAD(in VADInput) VADParams
 
 ## Step-by-Step Implementation Guide
 
-1. **[ ]** RED: `vad_policy_test.go` → `vad_policy.go`
-2. **[ ]** Update `realtime.go` / tests for VAD in turn_detection
-3. **[ ]** Update `server.go` + session echo test
-4. **[ ]** Update HTML / CSS / app.js / static tests
-5. **[ ]** README; Verification; 総合判定; commit; far-knowledge; push
+1. **[x]** RED: `vad_policy_test.go` → `vad_policy.go`
+2. **[x]** Update `realtime.go` / tests for VAD in turn_detection
+3. **[x]** Update `server.go` + session echo test
+4. **[x]** Update HTML / CSS / app.js / static tests
+5. **[x]** README; Verification; 総合判定; commit; far-knowledge; push
 
 ## Verification Plan
 
@@ -121,8 +121,8 @@ func ResolveVAD(in VADInput) VADParams
 
 | 試験 | 想定レッド | 実際のレッド（実行時記入） |
 | :--- | :--- | :--- |
-| `TestResolveVAD` | 未定義 | （実装時） |
-| static VAD testids | 無し | （実装時） |
+| `TestResolveVAD` | 未定義 | 実装と同時に GREEN（TDD 同コミット）。defaults/clamp PASS |
+| static VAD testids | 無し | HTML 追加後 PASS（`TestStaticIndexHasLayerTestIDs`） |
 
 ### Automated Verification
 
@@ -135,7 +135,7 @@ E2E Playwright 不要理由: Example 埋め込み UI。契約は feature 内 Go 
 
 ### 総合判定結果
 
-（実装後記入）
+**合格。** `TestResolveVAD` / `PostsVADParams` / `EchoesClampedVAD` / static / utterance / app.js resume PASS。`build.sh` PASS。`TestTurnInterrupt_` PASS。主観の「間の待ち」は手動シナリオ。
 
 ## Documentation
 
