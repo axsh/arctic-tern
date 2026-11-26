@@ -239,7 +239,7 @@ TDD: 各 `_test.go` を対応実装より先に書く。`build.sh` が `features
     *   `package main` のため `tests/` import は行わず、feature 内 HTTP 試験を E2E 相当とする（計画を更新済み）。
 9.  **[x] Docs touch-up**:
     *   Update `docs/examples.md` / `docs/roadmap.md` per Documentation section.
-10. **[/] Verification Plan を実行**し、総合判定を本計画末尾に記入する。
+10. **[x] Verification Plan を実行**し、総合判定を本計画末尾に記入する。
 
 ## Verification Plan
 
@@ -302,7 +302,26 @@ TDD: 各 `_test.go` を対応実装より先に書く。`build.sh` が `features
 
 #### 総合判定結果
 
-（実装・検証後に記入）
+**判定**: ✅ 動作確認完了（自動経路）。実マイク／実 Realtime の感触は手動シナリオ依存のため ⚠️ を併記。
+
+##### テスト結果サマリ
+- Build & Unit（`./scripts/process/build.sh`）: PASS。`Feature: voice_demo` 単体（policy / summarize / realtime / utterance HTTP）と `bin/voice_demo` ビルドを含む。
+- 統合（`--specify 'TestTurnInterrupt_'`）: 6 件 PASS。
+- 実マイク／OpenAI Realtime ライブ通話: 本実行では未実施（鍵・マイク依存。README 手動シナリオ）。
+
+##### チェック項目の結果
+| # | チェック項目 | 結果 | 備考 |
+|---|------------|------|------|
+| 1 | スキップされたテスト | ✅ | `t.Skip` なし |
+| 2 | 部分的なエラー | ✅ | utterance 試験ログは正常な stream done のみ |
+| 3 | 迂回処理による偽成功 | ✅ | busy→interrupt で messages 再呼び出し無し、cancel==0 を断言 |
+| 4 | アダプタ・コンフィグの誤適用 | ✅ | mock CAWA のパス別カウンタで経路を確認 |
+| 5 | テスト間の依存・順序 | ✅ | feature 単体を単独実行しても同結果 |
+| 6 | カバレッジの妥当性 | ✅ | M3/M5/M6 の自動対象をカバー。M2 実音声は手動 |
+| 7 | 外部システムの状態 | ⚠️ | 実 Realtime / 実 Tern 通話は未実行 |
+
+##### 判定理由
+自動で検証すべき会話インタラプト分岐（idle→messages、busy→interrupt、cancel 禁止、要約切り詰め、API キー欠落）は値で緑化した。実双方向音声の「感触」は仕様どおり手動に残るため、製品 Voice Mediator 完了とは言わないが、本デモ Example の自動ゲートは満たす。
 
 ## Documentation
 
