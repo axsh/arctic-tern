@@ -1,21 +1,31 @@
 // Plain Example front-end for features/voice_demo.
 //
-// Split of roles:
-//   1) OpenAI Realtime (WebRTC in the browser) = low-latency conversation audio.
-//   2) This demo's Go server + Tern CAWA = Coding Agent execution authority.
-// When you finish speaking, we POST the transcript to /api/utterance.
-// The server chooses messages (idle) or interrupt (busy). It must not cancel.
+// Two layers (keep them visually separate in the UI):
+//   1) OpenAI Realtime = low-latency conversation audio (mic/speaker).
+//   2) Tern CAWA       = Coding Agent execution (messages / interrupt).
+//
+// Why CAWA interrupt stays immediate even in "natural" mode:
+//   natural only softens how assistant *audio* stops. Execution steering
+//   must still call Interrupt as soon as a busy-turn utterance is finalized.
 
 const LONG_TASK_SAMPLE =
   "Please run a long shell command that sleeps for about 60 seconds, then create a file named long_task_done.txt with the text done. Narrate briefly only.";
+
+const MODE_PARAMS = {
+  natural: { fade_ms: 180, stop_label: "soft_vad+fade" },
+  abrupt: { fade_ms: 0, stop_label: "abrupt_cut" },
+};
 
 const els = {
   start: document.querySelector('[data-testid="btn-start"]'),
   end: document.querySelector('[data-testid="btn-end"]'),
   sample: document.querySelector('[data-testid="btn-sample-long"]'),
-  busy: document.querySelector('[data-testid="status-busy"]'),
+  mode: document.querySelector('[data-testid="bargein-mode"]'),
+  stopLabel: document.querySelector('[data-testid="bargein-stop-label"]'),
+  realtime: document.querySelector('[data-testid="status-realtime"]'),
+  cawa: document.querySelector('[data-testid="status-cawa"]'),
   action: document.querySelector('[data-testid="last-action"]'),
-  mode: document.querySelector('[data-testid="interrupt-mode"]'),
+  interruptMode: document.querySelector('[data-testid="interrupt-mode"]'),
   summary: document.querySelector('[data-testid="status-summary"]'),
   transcript: document.querySelector('[data-testid="transcript"]'),
 };
@@ -24,11 +34,32 @@ let pc = null;
 let dc = null;
 let statusTimer = null;
 let localStream = null;
+let remoteAudio = null;
+let fadeMs = MODE_PARAMS.natural.fade_ms;
+let callActive = false;
 
 function logLine(line) {
   els.transcript.textContent += line + "\n";
   els.transcript.scrollTop = els.transcript.scrollHeight;
 }
+
+function setRealtimeStatus(s) {
+  els.realtime.textContent = s;
+}
+
+function setCawaStatus(s) {
+  els.cawa.textContent = s;
+}
+
+function syncModeLabel() {
+  const mode = els.mode.value || "natural";
+  const p = MODE_PARAMS[mode] || MODE_PARAMS.natural;
+  fadeMs = p.fade_ms;
+  els.stopLabel.textContent = p.stop_label;
+}
+
+els.mode.addEventListener("change", syncModeLabel);
+syncModeLabel();
 
 async function postJSON(path, body) {
   const resp = await fetch(path, {
@@ -43,12 +74,20 @@ async function postJSON(path, body) {
   return data;
 }
 
-async function refreshStatus() {
+async function refreshCawaStatus() {
   const resp = await fetch("/api/status");
   const data = await resp.json();
-  els.busy.textContent = data.busy ? "yes" : "no";
+  if (!callActive && !data.session_id) {
+    setCawaStatus("no session");
+  } else if (data.busy) {
+    setCawaStatus("busy");
+  } else if (data.session_id) {
+    setCawaStatus("idle");
+  } else {
+    setCawaStatus("no session");
+  }
   els.action.textContent = data.last_action || "—";
-  els.mode.textContent = data.interrupt_mode || "—";
+  els.interruptMode.textContent = data.interrupt_mode || "—";
   els.summary.textContent = data.last_summary || "—";
 }
 
@@ -58,22 +97,47 @@ async function sendUtterance(text) {
   logLine("you> " + trimmed);
   const data = await postJSON("/api/utterance", { text: trimmed });
   logLine("cawa> action=" + data.action + " summary=" + (data.summary || ""));
-  await refreshStatus();
+  await refreshCawaStatus();
 }
 
-// OpenAI Realtime WebRTC with an ephemeral key from our server.
-// Official pattern: mint session server-side, then POST the browser SDP offer
-// to api.openai.com with Authorization: Bearer <ephemeral>.
+function fadeAndPauseRemoteAudio() {
+  if (!remoteAudio) return;
+  if (!fadeMs || fadeMs <= 0) {
+    remoteAudio.volume = 0;
+    try { remoteAudio.pause(); } catch (_) {}
+    return;
+  }
+  const start = remoteAudio.volume;
+  const steps = 8;
+  const stepMs = Math.max(16, Math.floor(fadeMs / steps));
+  let i = 0;
+  const timer = setInterval(() => {
+    i += 1;
+    remoteAudio.volume = Math.max(0, start * (1 - i / steps));
+    if (i >= steps) {
+      clearInterval(timer);
+      try { remoteAudio.pause(); } catch (_) {}
+      remoteAudio.volume = 1;
+    }
+  }, stepMs);
+}
+
 async function connectRealtime() {
-  const session = await postJSON("/api/realtime/session", {});
+  setRealtimeStatus("connecting");
+  const mode = els.mode.value || "natural";
+  const wrapped = await postJSON("/api/realtime/session", { barge_in_mode: mode });
+  if (wrapped.barge_in) {
+    fadeMs = wrapped.barge_in.fade_ms || 0;
+    els.stopLabel.textContent = wrapped.barge_in.stop_label || els.stopLabel.textContent;
+  }
+  const secret = wrapped.openai || wrapped;
   const ephemeral =
-    (session.client_secret && session.client_secret.value) ||
-    session.value ||
+    secret.value ||
+    (secret.client_secret && secret.client_secret.value) ||
     "";
   if (!ephemeral) {
-    throw new Error("realtime session response missing client_secret.value");
+    throw new Error("realtime client_secrets response missing value (ek_...)");
   }
-  const model = session.model || "gpt-4o-realtime-preview";
 
   pc = new RTCPeerConnection();
   localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -81,12 +145,12 @@ async function connectRealtime() {
     pc.addTrack(track, localStream);
   }
 
-  // Remote audio (Realtime speaking back) — attach to a hidden audio element.
-  const audioEl = document.createElement("audio");
-  audioEl.autoplay = true;
-  document.body.appendChild(audioEl);
+  remoteAudio = document.createElement("audio");
+  remoteAudio.autoplay = true;
+  document.body.appendChild(remoteAudio);
   pc.ontrack = (ev) => {
-    audioEl.srcObject = ev.streams[0];
+    remoteAudio.srcObject = ev.streams[0];
+    setRealtimeStatus("speaking");
   };
 
   dc = pc.createDataChannel("oai-events");
@@ -97,10 +161,20 @@ async function connectRealtime() {
     } catch {
       return;
     }
-    // Final user transcript → hand to CAWA policy on the demo server.
+    if (msg.type === "input_audio_buffer.speech_started") {
+      // Soften assistant playback on barge-in (natural fades; abrupt cuts).
+      fadeAndPauseRemoteAudio();
+      setRealtimeStatus("connected");
+    }
     if (msg.type === "conversation.item.input_audio_transcription.completed") {
       const transcript = msg.transcript || "";
       sendUtterance(transcript).catch((err) => logLine("error> " + err.message));
+    }
+    if (msg.type === "response.created" || msg.type === "output_audio_buffer.started") {
+      setRealtimeStatus("speaking");
+    }
+    if (msg.type === "response.done" || msg.type === "output_audio_buffer.stopped") {
+      if (els.realtime.textContent === "speaking") setRealtimeStatus("connected");
     }
     if (msg.type === "error") {
       logLine("realtime-error> " + JSON.stringify(msg.error || msg));
@@ -110,14 +184,12 @@ async function connectRealtime() {
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  const baseUrl = "https://api.openai.com/v1/realtime";
-  const sdpResp = await fetch(baseUrl + "?model=" + encodeURIComponent(model), {
+  const sdpResp = await fetch("https://api.openai.com/v1/realtime/calls", {
     method: "POST",
     body: offer.sdp,
     headers: {
       Authorization: "Bearer " + ephemeral,
       "Content-Type": "application/sdp",
-      "OpenAI-Beta": "realtime=v1",
     },
   });
   if (!sdpResp.ok) {
@@ -126,7 +198,8 @@ async function connectRealtime() {
   }
   const answer = await sdpResp.text();
   await pc.setRemoteDescription({ type: "answer", sdp: answer });
-  logLine("system> realtime connected");
+  setRealtimeStatus("connected");
+  logLine("realtime> connected (mode=" + mode + ")");
 }
 
 function stopRealtime() {
@@ -146,45 +219,55 @@ function stopRealtime() {
     for (const t of localStream.getTracks()) t.stop();
     localStream = null;
   }
+  if (remoteAudio) {
+    try { remoteAudio.pause(); } catch (_) {}
+    remoteAudio.remove();
+    remoteAudio = null;
+  }
 }
 
 els.start.addEventListener("click", async () => {
   els.start.disabled = true;
   try {
     await postJSON("/api/call/start", {});
-    logLine("system> CAWA session started");
-    // Realtime needs OPENAI_API_KEY on the server. If missing, you can still
-    // exercise interrupt via the sample long-task button.
+    callActive = true;
+    setCawaStatus("idle");
+    logLine("cawa> session started");
     try {
       await connectRealtime();
     } catch (err) {
-      logLine("system> realtime unavailable: " + err.message);
+      setRealtimeStatus("unavailable");
+      logLine("realtime> unavailable: " + err.message);
       logLine("system> use the long-task button to drive CAWA without mic");
     }
     els.end.disabled = false;
     els.sample.disabled = false;
     statusTimer = setInterval(() => {
-      refreshStatus().catch(() => {});
+      refreshCawaStatus().catch(() => {});
     }, 1000);
-    await refreshStatus();
+    await refreshCawaStatus();
   } catch (err) {
     logLine("error> " + err.message);
+    setCawaStatus("no session");
     els.start.disabled = false;
   }
 });
 
 els.end.addEventListener("click", async () => {
   stopRealtime();
+  callActive = false;
   try {
     await postJSON("/api/call/end", {});
-    logLine("system> call ended");
+    logLine("cawa> call ended");
   } catch (err) {
     logLine("error> " + err.message);
   }
+  setRealtimeStatus("disconnected");
+  setCawaStatus("no session");
   els.start.disabled = false;
   els.end.disabled = true;
   els.sample.disabled = true;
-  await refreshStatus();
+  await refreshCawaStatus();
 });
 
 els.sample.addEventListener("click", async () => {

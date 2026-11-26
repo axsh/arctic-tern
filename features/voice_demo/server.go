@@ -106,18 +106,39 @@ func (a *demoApp) handleCallEnd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) {
-	raw, err := createRealtimeEphemeralSession(r.Context(), a.openaiKey, "", "")
+	var req struct {
+		BargeInMode string `json:"barge_in_mode"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	barge := ResolveBargeIn(req.BargeInMode)
+
+	raw, err := createRealtimeEphemeralSession(r.Context(), a.openaiKey, "", "", barge)
 	if err != nil {
 		status := http.StatusBadGateway
 		if err.Error() == "OPENAI_API_KEY is not set" {
 			status = http.StatusServiceUnavailable
 		}
-		writeJSON(w, status, map[string]any{"ok": false, "error": err.Error()})
+		writeJSON(w, status, map[string]any{
+			"ok": false, "error": err.Error(),
+			"barge_in": map[string]any{
+				"mode": string(barge.Mode), "stop_label": barge.StopLabel, "fade_ms": barge.FadeMs,
+			},
+		})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(raw)
+	var openai any
+	if err := json.Unmarshal(raw, &openai); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": "invalid openai json"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"openai": openai,
+		"barge_in": map[string]any{
+			"mode": string(barge.Mode), "stop_label": barge.StopLabel, "fade_ms": barge.FadeMs,
+			"interrupt_response": barge.InterruptResponse,
+		},
+	})
 }
 
 func (a *demoApp) handleUtterance(w http.ResponseWriter, r *http.Request) {

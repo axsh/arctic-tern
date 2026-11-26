@@ -11,8 +11,9 @@
     <p class="eyebrow">Example only — not the production Voice Mediator</p>
     <h1>Tern voice demo</h1>
     <p class="lede">
-      Talk to a Coding Agent through Tern. Conversation audio uses OpenAI Realtime;
-      execution and barge-in use CAWA <code>messages</code> / <code>interrupt</code>.
+      Two layers on purpose: <strong>OpenAI Realtime</strong> handles conversation audio;
+      <strong>Tern CAWA</strong> runs the Coding Agent (<code>messages</code> / <code>interrupt</code>).
+      Watch the two panels below to see which layer is active.
     </p>
 
     <div class="row">
@@ -23,24 +24,50 @@
       </button>
     </div>
 
-    <dl class="status">
-      <div>
-        <dt>CAWA busy</dt>
-        <dd data-testid="status-busy" id="statusBusy">no</dd>
-      </div>
-      <div>
-        <dt>Last action</dt>
-        <dd data-testid="last-action" id="lastAction">—</dd>
-      </div>
-      <div>
-        <dt>Interrupt mode</dt>
-        <dd data-testid="interrupt-mode" id="interruptMode">—</dd>
-      </div>
-      <div>
-        <dt>Short summary</dt>
-        <dd data-testid="status-summary" id="statusSummary">—</dd>
-      </div>
-    </dl>
+    <div class="row mode-row">
+      <label for="bargeinMode">Barge-in voice mode</label>
+      <select data-testid="bargein-mode" id="bargeinMode">
+        <option value="natural" selected>natural (default)</option>
+        <option value="abrupt">abrupt (hard cut)</option>
+      </select>
+      <span>stop technique: <code data-testid="bargein-stop-label" id="bargeinStopLabel">soft_vad+fade</code></span>
+    </div>
+
+    <div class="layers">
+      <section class="layer" aria-labelledby="realtime-heading">
+        <h2 id="realtime-heading">OpenAI Realtime</h2>
+        <p class="layer-desc">Voice conversation (mic / speaker). Not the Coding Agent.</p>
+        <dl>
+          <div>
+            <dt>Status</dt>
+            <dd data-testid="status-realtime" id="statusRealtime">disconnected</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="layer" aria-labelledby="cawa-heading">
+        <h2 id="cawa-heading">Tern CAWA</h2>
+        <p class="layer-desc">Coding Agent execution via Tern (<code>messages</code> / <code>interrupt</code>).</p>
+        <dl>
+          <div>
+            <dt>Status</dt>
+            <dd data-testid="status-cawa" id="statusCawa">no session</dd>
+          </div>
+          <div>
+            <dt>Last action</dt>
+            <dd data-testid="last-action" id="lastAction">—</dd>
+          </div>
+          <div>
+            <dt>Interrupt mode</dt>
+            <dd data-testid="interrupt-mode" id="interruptMode">—</dd>
+          </div>
+          <div>
+            <dt>Short summary</dt>
+            <dd data-testid="status-summary" id="statusSummary">—</dd>
+          </div>
+        </dl>
+      </section>
+    </div>
 
     <section>
       <h2>Transcript / commands</h2>
@@ -48,8 +75,10 @@
     </section>
 
     <p class="hint">
-      Manual barge-in check: Start call → send the long-task sample → while busy, say
-      (or POST) a new instruction. Last action should become <code>interrupt</code>, not cancel.
+      Compare modes: set <strong>abrupt</strong>, let the assistant speak, then barge in (hard cut).
+      Switch to <strong>natural</strong> and repeat (soft VAD + short fade).
+      CAWA <code>last_action</code> should still become <code>interrupt</code> when busy.
+      Long-task button drives Tern only — Realtime can stay unavailable.
     </p>
   </main>
   <script src="/static/app.js"></script>
