@@ -68,8 +68,9 @@ Compare by ear: abrupt first, then natural. CAWA `last_action` should still show
 ## Manual scenarios
 
 1. Start call — Realtime panel becomes connected (or unavailable); CAWA becomes idle.
-2. Long-task button — CAWA busy; Realtime may stay unavailable.
-3. Barge-in while busy — CAWA last_action=`interrupt`; compare abrupt vs natural audio.
+2. Speak a short greeting — transcript shows `you>`; **assistant voice must be audible** after barge-in (if silent, check that barge-in softens volume but does not leave `<audio>` paused).
+3. Long-task button — CAWA busy; Realtime may stay unavailable.
+4. Barge-in while busy — CAWA last_action=`interrupt`; compare abrupt vs natural audio; assistant voice must resume after the next Realtime response.
 
 ## Environment
 

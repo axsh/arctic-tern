@@ -100,26 +100,34 @@ async function sendUtterance(text) {
   await refreshCawaStatus();
 }
 
-function fadeAndPauseRemoteAudio() {
+// Soften assistant playback on barge-in without pausing the <audio> element.
+// pause() leaves the element stopped; later Realtime audio never becomes audible
+// until play() runs again — which we do in ensureRemoteAudioPlaying.
+function softenRemoteAudioOnBargeIn() {
   if (!remoteAudio) return;
   if (!fadeMs || fadeMs <= 0) {
     remoteAudio.volume = 0;
-    try { remoteAudio.pause(); } catch (_) {}
     return;
   }
-  const start = remoteAudio.volume;
+  const start = remoteAudio.volume || 1;
   const steps = 8;
   const stepMs = Math.max(16, Math.floor(fadeMs / steps));
   let i = 0;
   const timer = setInterval(() => {
     i += 1;
     remoteAudio.volume = Math.max(0, start * (1 - i / steps));
-    if (i >= steps) {
-      clearInterval(timer);
-      try { remoteAudio.pause(); } catch (_) {}
-      remoteAudio.volume = 1;
-    }
+    if (i >= steps) clearInterval(timer);
   }, stepMs);
+}
+
+function ensureRemoteAudioPlaying() {
+  if (!remoteAudio) return;
+  remoteAudio.volume = 1;
+  const p = remoteAudio.play();
+  if (p && typeof p.catch === "function") {
+    p.catch(() => {});
+  }
+  logLine("realtime> resume playback");
 }
 
 async function connectRealtime() {
@@ -162,8 +170,9 @@ async function connectRealtime() {
       return;
     }
     if (msg.type === "input_audio_buffer.speech_started") {
-      // Soften assistant playback on barge-in (natural fades; abrupt cuts).
-      fadeAndPauseRemoteAudio();
+      // Soften assistant playback on barge-in (natural fades; abrupt mutes).
+      // Do not pause() — that permanently silences later assistant audio.
+      softenRemoteAudioOnBargeIn();
       setRealtimeStatus("connected");
     }
     if (msg.type === "conversation.item.input_audio_transcription.completed") {
@@ -171,6 +180,7 @@ async function connectRealtime() {
       sendUtterance(transcript).catch((err) => logLine("error> " + err.message));
     }
     if (msg.type === "response.created" || msg.type === "output_audio_buffer.started") {
+      ensureRemoteAudioPlaying();
       setRealtimeStatus("speaking");
     }
     if (msg.type === "response.done" || msg.type === "output_audio_buffer.stopped") {
