@@ -48,6 +48,7 @@ func NewDemoMux(cfg DemoConfig) http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(cfg.StaticDir))))
 	mux.HandleFunc("POST /api/call/start", app.handleCallStart)
 	mux.HandleFunc("POST /api/call/end", app.handleCallEnd)
+	mux.HandleFunc("GET /api/realtime/voices", app.handleVoices)
 	mux.HandleFunc("POST /api/realtime/session", app.handleRealtimeSession)
 	mux.HandleFunc("POST /api/utterance", app.handleUtterance)
 	mux.HandleFunc("GET /api/status", app.handleStatus)
@@ -111,6 +112,8 @@ func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) 
 		SilenceDurationMs *int     `json:"silence_duration_ms"`
 		Threshold         *float64 `json:"threshold"`
 		PrefixPaddingMs   *int     `json:"prefix_padding_ms"`
+		Voice             string   `json:"voice"`
+		Speed             float64  `json:"speed"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	barge := ResolveBargeIn(req.BargeInMode)
@@ -119,13 +122,15 @@ func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) 
 		Threshold:         req.Threshold,
 		PrefixPaddingMs:   req.PrefixPaddingMs,
 	})
+	voice, speed := ResolveOutputAudio(req.Voice, req.Speed)
 	vadEcho := map[string]any{
 		"silence_duration_ms": vad.SilenceDurationMs,
 		"threshold":           vad.Threshold,
 		"prefix_padding_ms":   vad.PrefixPaddingMs,
 	}
+	outputEcho := map[string]any{"voice": voice, "speed": speed}
 
-	raw, err := createRealtimeEphemeralSession(r.Context(), a.openaiKey, "", "", barge, vad)
+	raw, err := createRealtimeEphemeralSession(r.Context(), a.openaiKey, "", voice, speed, barge, vad)
 	if err != nil {
 		status := http.StatusBadGateway
 		if err.Error() == "OPENAI_API_KEY is not set" {
@@ -136,7 +141,8 @@ func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) 
 			"barge_in": map[string]any{
 				"mode": string(barge.Mode), "stop_label": barge.StopLabel, "fade_ms": barge.FadeMs,
 			},
-			"vad": vadEcho,
+			"vad":    vadEcho,
+			"output": outputEcho,
 		})
 		return
 	}
@@ -152,7 +158,8 @@ func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) 
 			"mode": string(barge.Mode), "stop_label": barge.StopLabel, "fade_ms": barge.FadeMs,
 			"interrupt_response": barge.InterruptResponse,
 		},
-		"vad": vadEcho,
+		"vad":    vadEcho,
+		"output": outputEcho,
 	})
 }
 
@@ -163,7 +170,8 @@ func (a *demoApp) handleUtterance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Text string `json:"text"`
+		Text      string `json:"text"`
+		RouteMode string `json:"route_mode"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid JSON"})
@@ -178,25 +186,41 @@ func (a *demoApp) handleUtterance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	action, summary, err := bridge.HandleUtterance(r.Context(), req.Text)
+	sent, action, reason, summary, err := bridge.HandleUtterance(r.Context(), req.Text, req.RouteMode)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"ok":     false,
 			"error":  err.Error(),
 			"action": string(action),
+			"sent":   sent,
+			"reason": reason,
+		})
+		return
+	}
+	if !sent {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "sent": false, "reason": reason, "action": "", "summary": "",
 		})
 		return
 	}
 	busy, lastAction, lastSummary, interruptMode, _ := bridge.Snapshot()
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"ok":             true,
+		"sent":           true,
+		"reason":         reason,
 		"action":         string(action),
 		"summary":        summary,
 		"busy":           busy,
 		"last_action":    string(lastAction),
 		"last_summary":   lastSummary,
 		"interrupt_mode": interruptMode,
-	})
+	}
+	if note, ok := BuildContextBridgeNote(summary); ok {
+		out["bridge_note"] = note
+	} else if note, ok := BuildContextBridgeNote(lastSummary); ok {
+		out["bridge_note"] = note
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *demoApp) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -210,14 +234,18 @@ func (a *demoApp) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	busy, lastAction, lastSummary, interruptMode, sessionID := bridge.Snapshot()
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"ok":             true,
 		"busy":           busy,
 		"last_action":    string(lastAction),
 		"last_summary":   lastSummary,
 		"interrupt_mode": interruptMode,
 		"session_id":     sessionID,
-	})
+	}
+	if note, ok := BuildContextBridgeNote(lastSummary); ok {
+		out["bridge_note"] = note
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

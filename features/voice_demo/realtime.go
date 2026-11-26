@@ -18,16 +18,14 @@ var openAIRealtimeClientSecretsURL = "https://api.openai.com/v1/realtime/client_
 // barge controls whether assistant audio is hard-interrupted on user speech
 // (abrupt) or soft (natural: interrupt_response=false).
 // vad controls how long mid-utterance silence is tolerated before the model replies.
-func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice string, barge BargeInParams, vad VADParams) ([]byte, error) {
+func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice string, speed float64, barge BargeInParams, vad VADParams) ([]byte, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY is not set")
 	}
 	if model == "" {
 		model = "gpt-realtime"
 	}
-	if voice == "" {
-		voice = "marin"
-	}
+	voice, speed = ResolveOutputAudio(voice, speed)
 	if barge.Mode == "" {
 		barge = ResolveBargeIn("natural")
 	}
@@ -43,7 +41,7 @@ func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice st
 		"session": map[string]any{
 			"type":         "realtime",
 			"model":        model,
-			"instructions": "You are the voice conversation layer for a Tern coding demo. Keep replies short. Do not read out long code or logs. Coding work is executed by a separate Coding Agent behind Tern; acknowledge task updates briefly when the user is told a short status.",
+			"instructions": "You are the voice conversation layer for a Tern coding demo. Keep replies short. Do not read out long code or logs. Coding work is executed by a separate Coding Agent behind Tern; when you receive notes prefixed with \"Tern coding agent status:\", treat them as ground truth about the agent. Acknowledge task updates briefly when asked.",
 			"audio": map[string]any{
 				"input": map[string]any{
 					"transcription": map[string]any{
@@ -53,15 +51,16 @@ func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice st
 					// immediately cancels assistant audio (abrupt). natural sets false.
 					// silence_duration_ms: wait through mid-utterance pauses before end-of-turn.
 					"turn_detection": map[string]any{
-						"type":                 "server_vad",
-						"interrupt_response":   barge.InterruptResponse,
-						"silence_duration_ms":  vad.SilenceDurationMs,
-						"threshold":            vad.Threshold,
-						"prefix_padding_ms":    vad.PrefixPaddingMs,
+						"type":                "server_vad",
+						"interrupt_response":  barge.InterruptResponse,
+						"silence_duration_ms": vad.SilenceDurationMs,
+						"threshold":           vad.Threshold,
+						"prefix_padding_ms":   vad.PrefixPaddingMs,
 					},
 				},
 				"output": map[string]any{
 					"voice": voice,
+					"speed": speed,
 				},
 			},
 		},

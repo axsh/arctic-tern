@@ -109,7 +109,7 @@ func TestUtteranceHandler_IdleMessagesBusyInterrupt(t *testing.T) {
 		t.Fatalf("start=%v", start)
 	}
 
-	u1 := postJSON("/api/utterance", map[string]string{"text": "run a long task"})
+	u1 := postJSON("/api/utterance", map[string]any{"text": "run a long task", "route_mode": "always"})
 	if u1["action"] != "messages" {
 		t.Fatalf("first action=%v want messages", u1["action"])
 	}
@@ -140,7 +140,7 @@ func TestUtteranceHandler_IdleMessagesBusyInterrupt(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	u2 := postJSON("/api/utterance", map[string]string{"text": "change of plan: only create b.txt"})
+	u2 := postJSON("/api/utterance", map[string]any{"text": "change of plan: only create b.txt", "route_mode": "always"})
 	if u2["action"] != "interrupt" {
 		t.Fatalf("second action=%v want interrupt body=%v", u2["action"], u2)
 	}

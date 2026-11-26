@@ -11,7 +11,7 @@ import (
 )
 
 func TestCreateRealtimeEphemeralSession_MissingKey(t *testing.T) {
-	_, err := createRealtimeEphemeralSession(context.Background(), "", "gpt-realtime", "marin", ResolveBargeIn("natural"), ResolveVAD(VADInput{}))
+	_, err := createRealtimeEphemeralSession(context.Background(), "", "gpt-realtime", "marin", 1.0, ResolveBargeIn("natural"), ResolveVAD(VADInput{}))
 	if err == nil {
 		t.Fatal("expected error when OPENAI_API_KEY is empty")
 	}
@@ -35,7 +35,7 @@ func TestCreateRealtimeEphemeralSession_PostsNaturalInterruptResponse(t *testing
 	openAIRealtimeClientSecretsURL = ts.URL + "/v1/realtime/client_secrets"
 	defer func() { openAIRealtimeClientSecretsURL = prev }()
 
-	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "marin", ResolveBargeIn("natural"), ResolveVAD(VADInput{}))
+	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "marin", 1.0, ResolveBargeIn("natural"), ResolveVAD(VADInput{}))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -61,13 +61,41 @@ func TestCreateRealtimeEphemeralSession_PostsAbruptInterruptResponse(t *testing.
 	openAIRealtimeClientSecretsURL = ts.URL + "/v1/realtime/client_secrets"
 	defer func() { openAIRealtimeClientSecretsURL = prev }()
 
-	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "marin", ResolveBargeIn("abrupt"), ResolveVAD(VADInput{}))
+	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "marin", 1.0, ResolveBargeIn("abrupt"), ResolveVAD(VADInput{}))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	ir := interruptResponseFromBody(t, sawBody)
 	if ir != true {
 		t.Fatalf("abrupt interrupt_response=%v want true", ir)
+	}
+}
+
+func TestCreateRealtimeEphemeralSession_PostsVoiceAndSpeed(t *testing.T) {
+	var sawBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &sawBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": "ek_test"})
+	}))
+	defer ts.Close()
+
+	prev := openAIRealtimeClientSecretsURL
+	openAIRealtimeClientSecretsURL = ts.URL + "/v1/realtime/client_secrets"
+	defer func() { openAIRealtimeClientSecretsURL = prev }()
+
+	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "cedar", 1.25, ResolveBargeIn("natural"), ResolveVAD(VADInput{}))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	session, _ := sawBody["session"].(map[string]any)
+	audio, _ := session["audio"].(map[string]any)
+	out, _ := audio["output"].(map[string]any)
+	if out["voice"] != "cedar" {
+		t.Fatalf("voice=%v", out["voice"])
+	}
+	if floatFromAny(out["speed"]) != 1.25 {
+		t.Fatalf("speed=%v", out["speed"])
 	}
 }
 
@@ -86,7 +114,7 @@ func TestCreateRealtimeEphemeralSession_PostsVADParams(t *testing.T) {
 
 	s, th, p := 1200, 0.6, 250
 	vad := ResolveVAD(VADInput{SilenceDurationMs: &s, Threshold: &th, PrefixPaddingMs: &p})
-	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "marin", ResolveBargeIn("natural"), vad)
+	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "marin", 1.0, ResolveBargeIn("natural"), vad)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

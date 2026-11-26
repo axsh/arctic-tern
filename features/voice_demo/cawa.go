@@ -93,21 +93,21 @@ func (b *cawaBridge) Snapshot() (busy bool, lastAction Action, lastSummary, inte
 	return b.busy, b.lastAction, b.lastSummary, b.interruptMode, id
 }
 
-// HandleUtterance applies the idle/busy policy and calls CAWA.
+// HandleUtterance applies routing (auto/always/never) then calls CAWA when send=true.
 // The HTTP handler can return as soon as the stream is opened; we mark busy
-// immediately so a second utterance becomes an interrupt (barge-in).
-func (b *cawaBridge) HandleUtterance(ctx context.Context, text string) (Action, string, error) {
+// immediately so a second work utterance becomes an interrupt (barge-in).
+func (b *cawaBridge) HandleUtterance(ctx context.Context, text, routeMode string) (sent bool, action Action, reason, summary string, err error) {
 	b.mu.Lock()
 	sess := b.session
 	busy := b.busy
 	b.mu.Unlock()
 	if sess == nil {
-		return ActionNone, "", fmt.Errorf("no CAWA session; call /api/call/start first")
+		return false, ActionNone, "", "", fmt.Errorf("no CAWA session; call /api/call/start first")
 	}
 
-	action, err := DecideUtteranceAction(busy, text)
-	if err != nil {
-		return ActionNone, "", err
+	send, action, reason := DecideUtteranceRoute(busy, text, routeMode)
+	if !send {
+		return false, ActionNone, reason, "", nil
 	}
 
 	// Detach from the HTTP request context. If we keep r.Context(), the
@@ -118,17 +118,14 @@ func (b *cawaBridge) HandleUtterance(ctx context.Context, text string) (Action, 
 	var stream *v1.Stream
 	switch action {
 	case ActionMessages:
-		// New turn while idle.
 		stream, err = sess.SendText(streamCtx, text)
 	case ActionInterrupt:
-		// Barge-in: stop in-flight work and continue with this instruction.
-		// Do NOT CancelTurn here — that would be cancel-then-messages.
 		stream, err = sess.Interrupt(streamCtx, text)
 	default:
-		return ActionNone, "", fmt.Errorf("unsupported action %s", action)
+		return false, ActionNone, reason, "", fmt.Errorf("unsupported action %s", action)
 	}
 	if err != nil {
-		return action, "", err
+		return true, action, reason, "", err
 	}
 
 	b.mu.Lock()
@@ -138,7 +135,7 @@ func (b *cawaBridge) HandleUtterance(ctx context.Context, text string) (Action, 
 	b.mu.Unlock()
 
 	go b.consumeStream(stream, action)
-	return action, b.summaryLockedCopy(), nil
+	return true, action, reason, b.summaryLockedCopy(), nil
 }
 
 func (b *cawaBridge) summaryLockedCopy() string {
