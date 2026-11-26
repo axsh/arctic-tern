@@ -140,7 +140,8 @@
     <p class="hint">
       Default <strong>auto</strong> route skips small talk to CAWA so Coding Agent is not interrupt-starved.
       Use <strong>always</strong> to replay the original barge-in demo. Context bridge injects short Tern status into Realtime (no auto-speak).
-      Demo work_dir is often a temp folder; agent sandbox may be read-only — see README.
+      Demo Tern needs <code>coding_agents.execution_mode: single_shot</code> (restart after config pull).
+      Prefer non-Temp <code>TERN_WORK_DIR</code>; CreateSession uses workspace-write — see README.
     </p>
   </main>
   <script src="/static/app.js"></script>

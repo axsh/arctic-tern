@@ -24,6 +24,8 @@ export TERN_VAULT_ANTHROPIC_PRIMARY="sk-ant-..." # if needed
 
 Default CAWA URL: `http://127.0.0.1:3100` (`agent_service.port`).
 
+Demo `settings/demo/model_profiles.yaml` sets `coding_agents.*.execution_mode: single_shot` so Codex closes stdin after the prompt (interactive without EOF hangs `codex exec -`). **Restart Tern after pulling this config change.**
+
 ```bash
 curl -s http://127.0.0.1:3100/health
 ./bin/ternctl agents
@@ -39,8 +41,12 @@ Rebuild after pulling changes (old binaries still call deprecated `/v1/realtime/
 go build -C features/voice_demo -o ../../bin/voice_demo .
 
 export TERN_URL="http://127.0.0.1:3100"
-export TERN_AGENT="wayfinder"
+export TERN_AGENT="wayfinder"   # or codex
 export OPENAI_API_KEY="sk-..."   # optional; without it use long-task button
+
+# Prefer a non-Temp work dir (Codex refuses helper binaries under AppData\Local\Temp)
+mkdir -p tmp/voice-demo-work
+export TERN_WORK_DIR="$(pwd)/tmp/voice-demo-work"
 
 ./bin/voice_demo -listen :8787
 ```
@@ -49,9 +55,10 @@ Open `http://127.0.0.1:8787`.
 
 Realtime uses `POST /v1/realtime/client_secrets` then browser `POST /v1/realtime/calls`.
 
-### work_dir note
+### work_dir and sandbox
 
-Default `-work-dir` is a temp folder. Some agent sandboxes are read-only or cannot write outside that path. If a long-task fails with a write error, set `TERN_WORK_DIR` to a writable project path and restart voice_demo.
+* Default `-work-dir` is a temp folder under the OS temp tree. On Windows, Codex may refuse `CODEX_HOME` under `AppData\Local\Temp`. Set `TERN_WORK_DIR` to a writable path outside Temp (example above).
+* voice_demo CreateSession uses `sandbox_mode=workspace-write` so agents can write under that work_dir.
 
 ## Where to look: OpenAI vs Tern
 
