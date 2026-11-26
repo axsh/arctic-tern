@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tern Voice Demo (Example)</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Example only — not the production Voice Mediator</p>
+    <h1>Tern voice demo</h1>
+    <p class="lede">
+      Talk to a Coding Agent through Tern. Conversation audio uses OpenAI Realtime;
+      execution and barge-in use CAWA <code>messages</code> / <code>interrupt</code>.
+    </p>
+
+    <div class="row">
+      <button type="button" data-testid="btn-start" id="btnStart">Start call</button>
+      <button type="button" data-testid="btn-end" id="btnEnd" disabled>End call</button>
+      <button type="button" data-testid="btn-sample-long" id="btnSampleLong" disabled>
+        Send long-task text (no mic)
+      </button>
+    </div>
+
+    <dl class="status">
+      <div>
+        <dt>CAWA busy</dt>
+        <dd data-testid="status-busy" id="statusBusy">no</dd>
+      </div>
+      <div>
+        <dt>Last action</dt>
+        <dd data-testid="last-action" id="lastAction">—</dd>
+      </div>
+      <div>
+        <dt>Interrupt mode</dt>
+        <dd data-testid="interrupt-mode" id="interruptMode">—</dd>
+      </div>
+      <div>
+        <dt>Short summary</dt>
+        <dd data-testid="status-summary" id="statusSummary">—</dd>
+      </div>
+    </dl>
+
+    <section>
+      <h2>Transcript / commands</h2>
+      <pre data-testid="transcript" id="transcript"></pre>
+    </section>
+
+    <p class="hint">
+      Manual barge-in check: Start call → send the long-task sample → while busy, say
+      (or POST) a new instruction. Last action should become <code>interrupt</code>, not cancel.
+    </p>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

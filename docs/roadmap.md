@@ -33,6 +33,7 @@ This is the current phase.
 * [ ] Context export/import
 * [x] Agent switching
 * [x] Model switching
+* [x] Voice demo example (`features/voice_demo`, Realtime + CAWA interrupt)
 * [ ] Multimodal Voice support
 
 ### Phase 3
