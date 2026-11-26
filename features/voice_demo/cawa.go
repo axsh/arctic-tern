@@ -44,9 +44,10 @@ func (b *cawaBridge) Start(ctx context.Context) error {
 		return fmt.Errorf("session already started")
 	}
 	sess, err := b.client.CreateSession(ctx, v1.SessionRequest{
-		Agent:      b.agent,
-		WorkDir:    b.workDir,
-		SessionDir: b.sessionDir,
+		Agent:       b.agent,
+		WorkDir:     b.workDir,
+		SessionDir:  b.sessionDir,
+		SandboxMode: v1.SandboxModeWorkspaceWrite,
 	})
 	if err != nil {
 		return err
