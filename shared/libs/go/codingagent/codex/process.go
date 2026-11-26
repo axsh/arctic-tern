@@ -34,6 +34,8 @@ type ProcessManager struct {
 	logger      logger.Logger
 	stdinWriter io.WriteCloser
 	stdinMu     sync.Mutex
+	stopOnce    sync.Once
+	stopErr     error
 }
 
 // WriteStdin writes additional input to the running CLI process.
@@ -733,13 +735,24 @@ func (pm *ProcessManager) closeStdin() {
 }
 
 // Stop gracefully terminates the subprocess and cleans up the codex home.
+// It is safe to call more than once; the kill path runs at most once.
 // 1. Send SIGTERM (Unix) or Kill (Windows)
 // 2. Wait up to 5 seconds for exit
 // 3. Force kill if timeout
 // 4. Clean up temporary CODEX_HOME directory
 func (pm *ProcessManager) Stop() error {
+	if pm == nil {
+		return nil
+	}
+	pm.stopOnce.Do(func() {
+		pm.stopErr = pm.stopOnceBody()
+	})
+	return pm.stopErr
+}
+
+func (pm *ProcessManager) stopOnceBody() error {
 	pm.closeStdin()
-	if pm.cmd.Process == nil {
+	if pm.cmd == nil || pm.cmd.Process == nil {
 		return nil
 	}
 
@@ -753,7 +766,9 @@ func (pm *ProcessManager) Stop() error {
 		if killErr := killCmd.Run(); killErr != nil {
 			pm.logger.Debug("taskkill failed (process may have already exited)", "error", killErr)
 		}
-		pm.cancel()
+		if pm.cancel != nil {
+			pm.cancel()
+		}
 		err = nil
 	} else {
 		pm.cmd.Process.Signal(syscall.SIGTERM)
@@ -763,7 +778,9 @@ func (pm *ProcessManager) Stop() error {
 		case err = <-done:
 		case <-time.After(gracefulShutdownTimeout):
 			pm.logger.Debug("graceful shutdown timed out, killing process")
-			pm.cancel()
+			if pm.cancel != nil {
+				pm.cancel()
+			}
 			err = <-done
 		}
 	}
