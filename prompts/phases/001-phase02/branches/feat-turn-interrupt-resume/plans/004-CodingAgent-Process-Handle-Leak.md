@@ -189,21 +189,21 @@ None.
 
 ## Step-by-Step Implementation Guide
 
-1. **[ ] レッド: codex ライフサイクルテストを追加**
+1. **[x] レッド: codex ライフサイクルテストを追加**
     *   Create `shared/libs/go/codingagent/codex/adapter_lifecycle_internal_test.go` with the five tests above (they fail or do not compile until production code exists).
     *   Run via Verification Plan unit path; confirm RED for missing helpers / untrack behavior.
-2. **[ ] グリーン: codex `Stop` 冪等化**
+2. **[x] グリーン: codex `Stop` 冪等化**
     *   Edit `shared/libs/go/codingagent/codex/process.go`: add `stopOnce`/`stopErr`; wrap body.
     *   Commit: `fix: make codex ProcessManager.Stop idempotent`
-3. **[ ] グリーン: codex track/untrack + session Close**
+3. **[x] グリーン: codex track/untrack + session Close**
     *   Edit `shared/libs/go/codingagent/codex/adapter.go` as in Proposed Changes.
     *   Make lifecycle tests PASS.
     *   Commit: `fix: untrack codex ProcessManager on session Close`
-4. **[ ] レッド→グリーン: claudecode 対称**
+4. **[x] レッド→グリーン: claudecode 対称**
     *   Add `adapter_lifecycle_internal_test.go` for claudecode.
     *   Mirror `process.go` Stop Once and `adapter.go` track/untrack.
     *   Commit: `fix: untrack claude ProcessManager on session Close`（テストは同コミットまたは直前コミット）
-5. **[ ] Verification Plan を実行**
+5. **[x] Verification Plan を実行**
     *   `./scripts/process/build.sh` 成功。
     *   `./scripts/process/integration_test.sh --specify 'TestTurnInterrupt_'` 成功。
     *   総合判定を本計画末尾に記入。
@@ -267,4 +267,24 @@ None.
 
 #### 総合判定結果
 
-（実装・検証完了後に記入）
+**判定**: ✅ 動作確認完了
+
+#### テスト結果サマリ
+- 全テスト数: build.sh パイプライン PASS（codingagent lifecycle 単体含む）+ `TestTurnInterrupt_` 6 件
+- 成功: 上記すべて
+- 失敗: 0 件
+- 事実上スキップ: 0 件
+
+#### チェック項目の結果
+| # | チェック項目 | 結果 | 備考 |
+|---|------------|------|------|
+| 1 | スキップされたテスト | ✅ | 該当なし |
+| 2 | 部分的なエラー | ✅ | integration ログに WARN/ERROR の異常兆候なし（BuiltinAgents の起動ログのみ） |
+| 3 | 迂回処理による偽成功 | ✅ | lifecycle 試験は同一パッケージで `procs` 件数と `Stop` Once を直接断言 |
+| 4 | アダプタ・コンフィグの誤適用 | ✅ | codex / claudecode 双方に対称テストあり |
+| 5 | テスト間の依存・順序問題 | ✅ | パッケージ内単体は独立。`TestTurnInterrupt_` も単独フィルタで PASS |
+| 6 | カバレッジの妥当性 | ✅ | L1〜L7（Stop 冪等、untrack、複数 Close、adapter Close、対称、interrupt 回帰）を実施 |
+| 7 | 外部システムの状態 | ✅ | 単体は短い OS プロセスのみ。interrupt 統合は stub/httptest 経路 |
+
+#### 判定理由
+session Close 後に追跡件数が 0 になること、および二重 Stop が安全であることを単体で証拠化した。既存 interrupt 統合も回帰していない。Windows Cancel→taskkill 順序による子プロセス孤児は本計画スコープ外（先送り backlog）であり、本判定の対象外とする。
