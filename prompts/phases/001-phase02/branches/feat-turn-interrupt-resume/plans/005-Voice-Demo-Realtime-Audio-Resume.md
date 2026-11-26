@@ -81,10 +81,10 @@ function ensureRemoteAudioPlaying() {
 
 ## Step-by-Step Implementation Guide
 
-1. **[ ]** RED: `app_js_assets_test.go` を追加し、現行 `app.js` で失敗することを確認する。
-2. **[ ]** GREEN: `app.js` を上記 Logic どおり修正する。
-3. **[ ]** README 一文を更新する。
-4. **[ ]** Verification Plan を実行し、総合判定を書いてコミット、far-knowledge、push する。
+1. **[x]** RED: `app_js_assets_test.go` を追加し、現行 `app.js` で失敗することを確認する。
+2. **[x]** GREEN: `app.js` を上記 Logic どおり修正する。
+3. **[x]** README 一文を更新する。
+4. **[x]** Verification Plan を実行し、総合判定を書いてコミット、far-knowledge、push する。
 
 ## Verification Plan
 
@@ -104,7 +104,7 @@ function ensureRemoteAudioPlaying() {
 
 | 試験 | 想定レッド | 実際のレッド（実行時記入） |
 | :--- | :--- | :--- |
-| `TestAppJSResumesRemoteAudioAfterBargeIn` | 旧 `fadeAndPauseRemoteAudio` + pause | （実装時） |
+| `TestAppJSResumesRemoteAudioAfterBargeIn` | 旧 `fadeAndPauseRemoteAudio` + pause | 実際: `fadeAndPauseRemoteAudio` 残存で FAIL（`tmp/app_js_red.txt`）。修正後 PASS |
 
 ### Automated Verification
 
@@ -117,7 +117,7 @@ E2E（Playwright）不要理由: 本変更は Example の埋め込み `app.js` �
 
 ### 総合判定結果
 
-（実装後記入）
+**合格。** `TestAppJSResumesRemoteAudioAfterBargeIn` RED→GREEN。`build.sh` PASS。`TestTurnInterrupt_` PASS。聞こえは手動シナリオ（仕様 §検証シナリオ）に委ねる。
 
 ## Documentation
 
