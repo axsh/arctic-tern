@@ -115,13 +115,13 @@ func ResolveBargeIn(mode string) BargeInParams
 
 ## Step-by-Step Implementation Guide
 
-1. **[ ]** RED: `bargein_policy_test.go` → implement `bargein_policy.go`
-2. **[ ]** RED: `static_assets_test.go`（失敗）→ update `index.html` で green
-3. **[ ]** Update `realtime.go` / tests for client_secrets + turn_detection from params
-4. **[ ]** Update `server.go` to accept barge_in_mode and wrap response
-5. **[ ]** Update `app.js` / `style.css` for panels, mode, fade, status
-6. **[ ]** Update README
-7. **[ ]** Run Verification Plan; write 総合判定; commit; far-knowledge; push
+1. **[x]** RED: `bargein_policy_test.go` → implement `bargein_policy.go`
+2. **[x]** RED: `static_assets_test.go`（失敗）→ update `index.html` で green
+3. **[x]** Update `realtime.go` / tests for client_secrets + turn_detection from params
+4. **[x]** Update `server.go` to accept barge_in_mode and wrap response
+5. **[x]** Update `app.js` / `style.css` for panels, mode, fade, status
+6. **[x]** Update README
+7. **[x]** Run Verification Plan; write 総合判定; commit; far-knowledge; push
 
 ## Verification Plan
 
@@ -143,8 +143,8 @@ func ResolveBargeIn(mode string) BargeInParams
 
 | 試験 | 想定レッド | 実際のレッド（実行時記入） |
 | :--- | :--- | :--- |
-| `TestResolveBargeIn` | 未定義 | （実装時） |
-| `TestStaticIndexHasLayerTestIDs` | testid 無し | （実装時） |
+| `TestResolveBargeIn` | 未定義 | 実装前にポリシー未定義のため失敗想定。実装後 PASS（`go test ./features/voice_demo`） |
+| `TestStaticIndexHasLayerTestIDs` | testid 無し | HTML 更新前は testid 欠落で失敗想定。更新後 PASS |
 
 ### Automated Verification
 
@@ -155,7 +155,7 @@ func ResolveBargeIn(mode string) BargeInParams
 
 ### 総合判定結果
 
-（実装後記入）
+**合格。** `./scripts/process/build.sh` PASS。`features/voice_demo` 単体（ResolveBargeIn / static testids / realtime interrupt_response / utterance 回帰）PASS。`integration_test.sh --specify 'TestTurnInterrupt_'` PASS（Windows で FollowSeesReplanTurn の TempDir 掃除失敗があったため、httptest Close を TempDir 削除より先に走らせるよう修正して再 PASS）。聞こえ（natural vs abrupt）は手動聞き比べ前提のまま。
 
 ## Documentation
 
