@@ -8,6 +8,8 @@
 
 これは CAWA の即時停止（割り込み MVP）とは別に、**Realtime 会話レイヤの既定 barge-in** が大きく効いている。デモの目的は「interrupt が効くこと」に加えて、**Example の範囲で自然さを考慮できること**を示せる必要がある。本番 Voice Mediator や CAWA soft interrupt（ツール境界待ち）に進む前に、会話UX側のレバーをデモに明示する。
 
+あわせて、現状 UI では **いま聞こえている／動いているのが OpenAI Realtime なのか Tern CAWA なのか**が分かりにくい。冒頭の説明文と transcript の接頭辞（`realtime` / `cawa`）に依存しており、status 欄は CAWA 寄りである。デモの学習目的（二層分離）を満たすには、Web UI 上で両層の状態が並んで見える必要がある。
+
 ### 現状の課題
 
 | 観点 | 現状 |
@@ -16,6 +18,7 @@
 | Realtime 発話 | ユーザー発話開始でアシスタント音声が即切断されやすい |
 | 説明力 | 「不自然だが仕様」としか言えず、自然さの選択肢がコードに無い |
 | 比較 | abrupt と natural を並べて聞き比べる口が無い |
+| 層の可視化 | OpenAI Voice と Tern のどちらが動いているか、UI だけでは追いづらい |
 
 ### スコープ
 
@@ -23,6 +26,7 @@
 | :--- | :--- |
 | 対象 | `features/voice_demo` 内の Realtime 発話停止ポリシーと、それに付随する UI／コメント／README |
 | 対象 | abrupt / natural の比較モード（自然さを考慮できることの提示） |
+| 対象 | Web UI での **会話層（OpenAI Realtime）** と **実行層（Tern CAWA）** の状態の並列表記 |
 | 対象 | CAWA `interrupt` 経路の維持（001 の M3 を壊さない） |
 | 非対象 | CAWA 本体の soft interrupt（ツール完了待ち）。000 仕様・backlog:f627eae3-e0a1-4923-9ddc-cbc531851166 |
 | 非対象 | 本番 Voice Mediator／ベンダー抽象（backlog:9e1a6c40-92ce-40bc-980a-f36e8b7d7b26） |
@@ -46,6 +50,22 @@
 - **実行層（CAWA）**: busy 中の確定ユーザー発話は、従来どおり **即 `Session.Interrupt`** する（001 の M3、backlog:1281294e-21e2-4637-8e4a-7a8239939b72）。自然さのために CAWA interrupt を遅延させない（仮決定 backlog:e6861c32-96d0-4b5f-b426-7f9dd07d79c7）。
 - **会話層（Realtime）**: アシスタント発話の止め方をポリシー化し、「即切断」以外を選べるようにする。
 - コードコメントと README に、上記二層の分担を英語または日本語で書く（Example スタイル維持）。
+
+#### M1b. Web UI で「どちらが動いているか」が分かること
+
+画面上に、少なくとも次の **2 つの状態パネル（または同等の並列表記）** を常時見せる。ログを読まなくても層が分かること。
+
+| 層 | ラベル例 | 最低限見せる状態 |
+| :--- | :--- | :--- |
+| 会話層 | OpenAI Realtime | `disconnected` / `connecting` / `connected` / `unavailable`（鍵欠落や SDP 失敗）。可能なら `speaking`（アシスタント再生中） |
+| 実行層 | Tern CAWA | `no session` / `idle` / `busy`、および `last_action`（`messages` / `interrupt`）、`interrupt_mode`（あれば） |
+
+追加の必須:
+
+1. 各パネルに短い説明文を添える（例: 「声のやり取り」「Coding Agent の実行」）。
+2. Realtime が `unavailable` でも、**Send long-task text** 等で CAWA だけ動かせること、およびそのとき会話層が unavailable のまま実行層だけが busy に変わることが画面で追えること。
+3. 主要要素に `data-testid` を付ける（例: `status-realtime`、`status-cawa`）。
+4. transcript の接頭辞（`realtime` / `cawa`）は残してよいが、**それだけに頼らない**。
 
 #### M2. natural モード（既定）
 
@@ -80,6 +100,7 @@ natural モードでは、少なくとも次を満たすこと。
   - モード設定（natural / abrupt）がサーバまたはクライアントのポリシー関数に反映されること
   - natural 用の停止ヘルパ（フェード時間、Ack 文言、VAD フラグなど）が期待どおりのパラメータを返すこと
   - busy → interrupt / idle → messages の分岐がモード切替後も壊れていないこと（001 の回帰）
+  - 層状態の表示用ヘルパまたは DOM 初期値（Realtime=`disconnected`、CAWA=`no session` 等）が期待どおりであること。HTML に `data-testid="status-realtime"` / `status-cawa`（または計画で決めた ID）が存在すること
 - 聞こえ方そのものの手動確認は残してよいが、自動テストをゼロにしてはならない。
 
 ### 任意要件 (Should / Nice)
@@ -115,15 +136,17 @@ flowchart TB
 1. **実行の正しさ**と**聞こえの自然さ**を同じノブに載せない。
 2. 自然さは主に Realtime／ブラウザ再生側で示す。CAWA soft interrupt は別仕様。
 3. 比較モードで「考慮できること」をレビューアが耳で確認できるようにする。
+4. **可視化**も二層に分ける。1 つの「status」に混ぜない。
 
 ### 主要変更箇所（想定）
 
 | 箇所 | 役割 |
 | :--- | :--- |
-| `features/voice_demo/static/app.js` | モード切替、フェード／再生制御、Realtime イベント解釈 |
+| `features/voice_demo/static/app.js` | モード切替、フェード／再生制御、Realtime イベント解釈、両層の状態更新 |
 | `features/voice_demo/realtime.go` | client_secrets の session に turn_detection / interrupt 関連設定をモード別に載せる（必要な場合） |
-| `features/voice_demo/static/index.html` | abrupt / natural トグル（`data-testid` 付き） |
-| `features/voice_demo/README.md` | 聞き比べ手順、二層の説明 |
+| `features/voice_demo/static/index.html` | abrupt / natural トグル、OpenAI / Tern の並列表記（`data-testid` 付き） |
+| `features/voice_demo/static/style.css` | 二列パネルが読みやすい最小スタイル |
+| `features/voice_demo/README.md` | 聞き比べ手順、二層の説明、「どこを見ればどちらか分かる」 |
 | 小さな `bargein_policy.go` または JS 内関数 | モード → パラメータの表（単体テスト容易なら Go 側に寄せてよい） |
 
 ### モード定義（仮）
@@ -154,9 +177,12 @@ flowchart TB
    (1) natural で idle 発話 → messages。(2) busy にして追発話 → interrupt。(3) abrupt に切り替えて同じ。(4) どちらも cancel→messages になっていない。
 
 5. **README / コメントで二層が説明されている**  
-   (1) README に abrupt vs natural の聞き比べ手順がある。(2) コードに「CAWA は即 interrupt、声は natural で緩和」のコメントがある。
+   (1) README に abrupt vs natural の聞き比べ手順がある。(2) コードに「CAWA は即 interrupt、声は natural で緩和」のコメントがある。(3) README に「OpenAI パネルと Tern パネルの見方」がある。
 
-6. **Example の読みやすさ**  
+6. **UI で OpenAI と Tern が並んで見える**  
+   (1) ページを開くと会話層・実行層の2パネル（または同等）がある。(2) Start call 成功後、Realtime が connected（または unavailable）、CAWA が idle などになる。(3) long-task ボタンだけ押すと、Realtime が unavailable のままでも CAWA が busy → summary / last_action が変わる。(4) busy 中の追発話で CAWA パネルの last_action が interrupt になる。
+
+7. **Example の読みやすさ**  
    (1) 追加ファイルが過剰に分割されていない。(2) ベンダーアダプタ層を増やしていない。
 
 ---
@@ -168,10 +194,11 @@ flowchart TB
 | 要件 | 検証 |
 | :--- | :--- |
 | M1 二層明示 | README／コメントのレビュー + モード別パラメータ試験 |
+| M1b 層の可視化 | 手動シナリオ 6。自動: `index.html` の testid／初期ラベル、状態遷移ヘルパがあればその単体 |
 | M2 natural | 手動シナリオ 3。自動: モード→パラメータ（フェード ms、interrupt_response false 等） |
 | M3 abrupt | 手動シナリオ 2。自動: abrupt パラメータが即切断向きであること |
 | M4 CAWA 観測性 | 既存 `TestUtteranceHandler_IdleMessagesBusyInterrupt` の回帰 + モード付きケース |
-| M5 Example スタイル | レビュー（シナリオ 6） |
+| M5 Example スタイル | レビュー（シナリオ 7） |
 | M6 自動回帰 | 下記コマンド |
 
 ### ビルド・自動化コマンド
