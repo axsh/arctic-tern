@@ -77,10 +77,10 @@ hint に一行: demo Tern は single_shot 設定が必要／work_dir は Temp �
 
 ## Step-by-Step Implementation Guide
 
-1. **[ ]** RED: demo profiles load test（single_shot 未設定で失敗することを確認）→ YAML 追加で GREEN
-2. **[ ]** RED: CreateSession sandbox_mode 試験 → `cawa.go` で GREEN
-3. **[ ]** README + index hint
-4. **[ ]** Verification; 総合判定; far-knowledge; push
+1. **[x]** RED: demo profiles load test（single_shot 未設定で失敗することを確認）→ YAML 追加で GREEN
+2. **[x]** RED: CreateSession sandbox_mode 試験 → `cawa.go` で GREEN
+3. **[x]** README + index hint
+4. **[x]** Verification; 総合判定; far-knowledge; push
 
 ## Verification Plan
 
@@ -97,8 +97,8 @@ hint に一行: demo Tern は single_shot 設定が必要／work_dir は Temp �
 
 | 試験 | 想定レッド | 実際 |
 | :--- | :--- | :--- |
-| Demo CodingAgents single_shot | coding_agents 無し | （実装時） |
-| CreateSession sandbox_mode | フィールド無し | （実装時） |
+| Demo CodingAgents single_shot | coding_agents 無し | RED→GREEN（`tmp/red_demo_profiles.txt` / green） |
+| CreateSession sandbox_mode | フィールド無し | RED→GREEN（`tmp/red_sandbox.txt` / green） |
 
 ### Automated Verification
 
@@ -119,7 +119,7 @@ E2E Playwright 不要: 設定と CreateSession body の契約試験で足りる�
 
 ### 総合判定結果
 
-（実装後記入）
+**合格**（2026-11-27）。`build.sh` PASS、`go test -C features/voice_demo` PASS、`TestTurnInterrupt_` PASS。M1–M4 / S1 を実装。S2 は README 案内のみ。
 
 ## Documentation
 
