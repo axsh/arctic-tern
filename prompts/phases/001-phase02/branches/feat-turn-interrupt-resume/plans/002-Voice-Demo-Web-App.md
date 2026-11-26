@@ -211,39 +211,35 @@ TDD: 各 `_test.go` を対応実装より先に書く。`build.sh` が `features
 
 ### tests（統合・E2E 相当）
 
-#### [NEW] [tests/voice_demo_policy_http_test.go](tests/voice_demo_policy_http_test.go)
+`features/voice_demo` は Example として `package main` のため、`tests/` から import しない。HTTP+mock CAWA の E2E 相当は feature 内の `TestUtteranceHandler_IdleMessagesBusyInterrupt` とし、`./scripts/process/build.sh` が feature 単体として実行する。
 
-*   **Description**: リポジトリ標準の統合テスト置き場から、voice_demo の HTTP+mock CAWA ハッピーパス（idle messages → busy interrupt、cancel ゼロ）を再確認する。`features/voice_demo` を import してハンドラを共有する。もし feature の内部シンボルが unexported で難しい場合は、feature 側に `NewDemoMuxForTest(...)` のような **テスト用コンストラクタを1つだけ** exported してよい（過剰な公開 API は作らない）。
-*   **テストケース**: `TestVoiceDemo_UtteranceRoutesIdleToMessagesAndBusyToInterrupt`
-*   **検証ポイント**: mock CAWA の呼び出しカウントと、デモ JSON の `action` フィールド。
-
-> 実マイク／実 OpenAI Realtime／実 Coding Agent のライブ通話は CI では必須にしない（鍵・マイク依存）。仕様 M6 およびシナリオ 1・3 の手動は README に残し、自動の主証拠はポリシーと HTTP 経路とする。フルブラウザ Playwright E2E は本デモでは計画しない（React SPA の §10 対象外の静的 Example であり、Realtime WebRTC が CI で不安定なため。代替として上記 Go HTTP 統合を E2E 相当とする）。
+> 実マイク／実 OpenAI Realtime／実 Coding Agent のライブ通話は CI では必須にしない（鍵・マイク依存）。仕様 M6 およびシナリオ 1・3 の手動は README に残し、自動の主証拠はポリシーと HTTP 経路とする。フルブラウザ Playwright E2E は本デモでは計画しない。
 
 ## Step-by-Step Implementation Guide
 
-1.  **[ ] Scaffold module**:
+1.  **[x] Scaffold module**:
     *   Create `features/voice_demo/go.mod` with replace to repo root.
     *   Create empty `main.go` that compiles (`package main` + `func main(){}`) so `build.sh` can discover the module after tests exist.
-2.  **[ ] RED policy tests then implement**:
+2.  **[x] RED policy tests then implement**:
     *   Add `policy_test.go` → run via `./scripts/process/build.sh`（feature 単体で失敗することを確認）→ implement `policy.go` → green.
-3.  **[ ] RED summarize tests then implement**:
+3.  **[x] RED summarize tests then implement**:
     *   Add `summarize_test.go` → fail → `summarize.go` → green.
-4.  **[ ] RED realtime missing-key test then implement**:
+4.  **[x] RED realtime missing-key test then implement**:
     *   Add `realtime_test.go` → `realtime.go`（キー欠落＋任意で httptest 成功）.
-5.  **[ ] RED utterance HTTP test (feature-local) then implement bridge + handlers**:
+5.  **[x] RED utterance HTTP test (feature-local) then implement bridge + handlers**:
     *   Add mock CAWA + `utterance_handler_test.go`.
     *   Implement `cawa.go` and HTTP wiring in `main.go`（または `server.go` にハンドラを分離してもよいが、ファイルは少数に保つ）。
     *   Ensure barge-in never calls cancel.
-6.  **[ ] Static UI**:
+6.  **[x] Static UI**:
     *   Add `static/index.html`, `app.js`, `style.css` with comments and testids.
     *   Wire `embed.FS` or `http.Dir` for static files.
-7.  **[ ] README**:
+7.  **[x] README**:
     *   Write startup, env vars, manual scenarios 1 and 3, sample long prompt, demo disclaimer.
-8.  **[ ] Integration test in tests/**:
-    *   Add `tests/voice_demo_policy_http_test.go` as specified.
-9.  **[ ] Docs touch-up**:
+8.  **[x] Integration test in tests/**:
+    *   `package main` のため `tests/` import は行わず、feature 内 HTTP 試験を E2E 相当とする（計画を更新済み）。
+9.  **[x] Docs touch-up**:
     *   Update `docs/examples.md` / `docs/roadmap.md` per Documentation section.
-10. **[ ] Verification Plan を実行**し、総合判定を本計画末尾に記入する。
+10. **[/] Verification Plan を実行**し、総合判定を本計画末尾に記入する。
 
 ## Verification Plan
 
@@ -255,7 +251,7 @@ TDD: 各 `_test.go` を対応実装より先に書く。`build.sh` が `features
 | :--- | :--- | :--- |
 | L1 末端ロジック | policy / summarize / missing API key | `TestDecideUtteranceAction`、`TestSummarizeEvent`、`TestCreateRealtimeEphemeralSession_MissingKey` |
 | L2 HTTP（mock CAWA） | utterance 経路、cancel 非呼び出し | `TestUtteranceHandler_IdleMessagesBusyInterrupt`（feature 内） |
-| L3 統合 | tests/ から同じ経路 | `TestVoiceDemo_UtteranceRoutesIdleToMessagesAndBusyToInterrupt` |
+| L3 統合 / E2E 相当 | feature 内 HTTP+mock CAWA（`build.sh` が実行） | `TestUtteranceHandler_IdleMessagesBusyInterrupt` |
 | L4 回帰 | 既存 interrupt 契約 | `TestTurnInterrupt_` |
 | L5 手動（自動対象外） | 実マイク往復・実 barge-in | README シナリオ 1・3 |
 
@@ -282,11 +278,10 @@ TDD: 各 `_test.go` を対応実装より先に書く。`build.sh` が `features
 
 | 試験名 | 想定するレッドの理由 | 実際のレッド（実行時に記入） |
 | :--- | :--- | :--- |
-| `TestDecideUtteranceAction` | `policy.go` 未作成 | （実装時記入） |
-| `TestSummarizeEvent` | `summarize.go` 未作成 | （実装時記入） |
-| `TestCreateRealtimeEphemeralSession_MissingKey` | 関数未作成 | （実装時記入） |
-| `TestUtteranceHandler_IdleMessagesBusyInterrupt` | ハンドラ未配線 | （実装時記入） |
-| `TestVoiceDemo_UtteranceRoutesIdleToMessagesAndBusyToInterrupt` | mux 未 export / 未実装 | （実装時記入） |
+| `TestDecideUtteranceAction` | `policy.go` 未作成 | `undefined: Action` / `DecideUtteranceAction`（`tmp/voice_demo_red1.txt`） |
+| `TestSummarizeEvent` | `summarize.go` 未作成 | 同上ビルド失敗で `undefined: SummarizeEvent` |
+| `TestCreateRealtimeEphemeralSession_MissingKey` | 関数未作成 | 実装前は未定義。実装後に欠落キーで緑を確認 |
+| `TestUtteranceHandler_IdleMessagesBusyInterrupt` | ハンドラ未配線 | 実装中、HTTP リクエスト ctx キャンセルで busy が落ち `action=messages` となり一度レッド。`context.WithoutCancel` で緑化 |
 
 ### Automated Verification
 
@@ -294,12 +289,12 @@ TDD: 各 `_test.go` を対応実装より先に書く。`build.sh` が `features
     ```bash
     ./scripts/process/build.sh
     ```
-2.  **Integration（voice demo HTTP + 既存 interrupt 回帰）**:
+2.  **Integration（既存 interrupt 回帰）**:
     ```bash
-    ./scripts/process/build.sh && ./scripts/process/integration_test.sh --specify 'TestVoiceDemo_|TestTurnInterrupt_'
+    ./scripts/process/build.sh && ./scripts/process/integration_test.sh --specify 'TestTurnInterrupt_'
     ```
-    *   **Log Verification**: voice demo 試験が PASS。TurnInterrupt が回帰していないこと。
-3.  **E2E**: 上記 `TestVoiceDemo_*` を E2E 相当とする（実ブラウザ／実 Realtime は鍵・マイク依存のため自動必須にしない。理由は Proposed Changes の tests 節）。手動シナリオは README。
+    *   **Log Verification**: TurnInterrupt が回帰していないこと。voice_demo の HTTP E2E 相当は step 1 の feature 単体（`TestUtteranceHandler_*`）で確認済みであること。
+3.  **E2E**: `TestUtteranceHandler_IdleMessagesBusyInterrupt` を E2E 相当とする（実ブラウザ／実 Realtime は鍵・マイク依存のため自動必須にしない）。手動シナリオは README。
 
 ### 総合判定（testing-rules §9）
 
