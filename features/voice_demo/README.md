@@ -49,6 +49,10 @@ Open `http://127.0.0.1:8787`.
 
 Realtime uses `POST /v1/realtime/client_secrets` then browser `POST /v1/realtime/calls`.
 
+### work_dir note
+
+Default `-work-dir` is a temp folder. Some agent sandboxes are read-only or cannot write outside that path. If a long-task fails with a write error, set `TERN_WORK_DIR` to a writable project path and restart voice_demo.
+
 ## Where to look: OpenAI vs Tern
 
 | Panel | Meaning |
@@ -58,14 +62,39 @@ Realtime uses `POST /v1/realtime/client_secrets` then browser `POST /v1/realtime
 
 If Realtime is `unavailable` but you click **Send long-task text**, only the Tern panel should move to `busy`. That proves Tern works without OpenAI voice.
 
+## CAWA route mode
+
+| Mode | Behavior |
+| :--- | :--- |
+| **auto** (default) | Send only work-like utterances (and work-change while busy). Skips small talk so the agent is not interrupt-starved |
+| **always** | Every finalized transcript goes to CAWA (original barge-in demo) |
+| **never** | Realtime only; CAWA is not called |
+
+**Send last line to Tern** forces `route_mode=always` for the last user line.
+
+## Context bridge
+
+When **Context bridge** is on (default), short CAWA summaries are injected into the Realtime conversation as `conversation.item.create` notes (`Tern coding agent status: …`). No automatic `response.create` — Realtime does not speak the note by itself.
+
+## Voice / speed
+
+UI knobs map to Realtime `audio.output.voice` and `audio.output.speed`. They apply on the **next** Realtime connect (voice cannot change mid-session after first audio).
+
+| Control | Default | Notes |
+| :--- | ---: | :--- |
+| Voice | marin | Loaded from `GET /api/realtime/voices` (curated list) |
+| Speed | 1.0 | Clamped 0.25–1.5; presets Slow 0.8 / Normal 1.0 / Fast 1.25 |
+
+Applied values show under the controls (`realtime-output-applied`).
+
 ## Barge-in modes
 
 | Mode | Assistant audio on user barge-in | CAWA when busy |
 | :--- | :--- | :--- |
-| **natural** (default) | soft VAD (`interrupt_response=false`) + short fade | immediate `interrupt` |
-| **abrupt** | hard cut (`interrupt_response=true`, no fade) | immediate `interrupt` |
+| **natural** (default) | soft VAD (`interrupt_response=false`) + short fade + `response.cancel` if active | immediate `interrupt` (when routed) |
+| **abrupt** | hard cut (`interrupt_response=true`, no fade) | immediate `interrupt` (when routed) |
 
-Compare by ear: abrupt first, then natural. CAWA `last_action` should still show `interrupt` when the agent was busy.
+Compare by ear: abrupt first, then natural. CAWA `last_action` should still show `interrupt` when the agent was busy and the utterance was routed.
 
 ## Turn-end wait (VAD)
 
@@ -81,11 +110,11 @@ Presets: **Responsive (500ms)** vs **Patient (1200ms)**. Applied values show und
 
 ## Manual scenarios
 
-1. Start call — Realtime panel becomes connected (or unavailable); CAWA becomes idle; `vad-applied` shows clamped values.
-2. Speak a short greeting — transcript shows `you>`; **assistant voice must be audible** after barge-in (if silent, check that barge-in softens volume but does not leave `<audio>` paused).
-3. Compare silence 300 vs 1200 (End call, change slider, Start again) — short pauses should trigger replies less often at 1200.
-4. Long-task button — CAWA busy; Realtime may stay unavailable.
-5. Barge-in while busy — CAWA last_action=`interrupt`; compare abrupt vs natural audio; assistant voice must resume after the next Realtime response.
+1. Start call — Realtime panel becomes connected (or unavailable); CAWA becomes idle; voice/speed and vad-applied show clamped values.
+2. Speak a short greeting with **auto** — transcript may show `route> skip cawa`; Tern stays idle.
+3. Speak a clear work request or use **Send long-task text** — CAWA busy; optional `bridge>` lines when summaries update.
+4. Switch route to **always** and barge-in while busy — CAWA last_action=`interrupt`.
+5. Compare abrupt vs natural audio; assistant voice must resume after the next Realtime response (resume log once per response).
 
 ## Environment
 
@@ -93,6 +122,6 @@ Presets: **Responsive (500ms)** vs **Patient (1200ms)**. Applied values show und
 | :--- | :--- |
 | `TERN_URL` / `-tern-url` | CAWA base URL (required), demo default `http://127.0.0.1:3100` |
 | `TERN_AGENT` / `-agent` | Agent name (default `wayfinder`) |
-| `TERN_WORK_DIR` / `-work-dir` | Work directory (default temp) |
+| `TERN_WORK_DIR` / `-work-dir` | Work directory (default temp; prefer a writable path) |
 | `OPENAI_API_KEY` | Realtime ephemeral minting (optional) |
 | `-listen` | Demo HTTP listen addr (default `:8787`) |

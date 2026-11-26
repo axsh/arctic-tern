@@ -19,6 +19,12 @@ func TestStaticIndexHasLayerTestIDs(t *testing.T) {
 		`data-testid="status-cawa"`,
 		`data-testid="bargein-mode"`,
 		`data-testid="bargein-stop-label"`,
+		`data-testid="cawa-route-mode"`,
+		`data-testid="context-bridge"`,
+		`data-testid="realtime-voice"`,
+		`data-testid="realtime-speed"`,
+		`data-testid="realtime-output-applied"`,
+		`data-testid="btn-send-tern"`,
 		`data-testid="vad-silence-ms"`,
 		`data-testid="vad-threshold"`,
 		`data-testid="vad-prefix-ms"`,
@@ -27,6 +33,7 @@ func TestStaticIndexHasLayerTestIDs(t *testing.T) {
 		">disconnected<",
 		">no session<",
 		`value="natural" selected`,
+		`value="auto" selected`,
 	}
 	for _, n := range needles {
 		if !strings.Contains(html, n) {

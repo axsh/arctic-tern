@@ -22,6 +22,9 @@
       <button type="button" data-testid="btn-sample-long" id="btnSampleLong" disabled>
         Send long-task text (no mic)
       </button>
+      <button type="button" data-testid="btn-send-tern" id="btnSendTern" disabled>
+        Send last line to Tern
+      </button>
     </div>
 
     <div class="row mode-row">
@@ -32,6 +35,42 @@
       </select>
       <span>stop technique: <code data-testid="bargein-stop-label" id="bargeinStopLabel">soft_vad+fade</code></span>
     </div>
+
+    <div class="row mode-row">
+      <label for="cawaRouteMode">CAWA route mode</label>
+      <select data-testid="cawa-route-mode" id="cawaRouteMode">
+        <option value="auto" selected>auto (default — skip chat)</option>
+        <option value="always">always (every utterance)</option>
+        <option value="never">never (Realtime only)</option>
+      </select>
+      <label class="check">
+        <input type="checkbox" data-testid="context-bridge" id="contextBridge" checked />
+        Context bridge (CAWA → Realtime)
+      </label>
+    </div>
+
+    <fieldset class="vad-row">
+      <legend>Voice output (applies on next Realtime connect)</legend>
+      <p class="vad-note">Voice cannot change mid-session after first audio. Speed applies on reconnect.</p>
+      <div class="vad-controls">
+        <label>
+          Voice
+          <select data-testid="realtime-voice" id="realtimeVoice">
+            <option value="marin" selected>marin</option>
+          </select>
+        </label>
+        <label>
+          Speed
+          <input type="number" data-testid="realtime-speed" id="realtimeSpeed" min="0.25" max="1.5" step="0.05" value="1" />
+        </label>
+      </div>
+      <div class="row vad-presets">
+        <button type="button" data-testid="speed-preset-slow" id="speedSlow">Slow 0.8</button>
+        <button type="button" data-testid="speed-preset-normal" id="speedNormal">Normal 1.0</button>
+        <button type="button" data-testid="speed-preset-fast" id="speedFast">Fast 1.25</button>
+      </div>
+      <p>Applied output: <code data-testid="realtime-output-applied" id="realtimeOutputApplied">—</code></p>
+    </fieldset>
 
     <fieldset class="vad-row">
       <legend>Turn-end wait (OpenAI server_vad)</legend>
@@ -99,11 +138,9 @@
     </section>
 
     <p class="hint">
-      Compare modes: set <strong>abrupt</strong>, let the assistant speak, then barge in (hard cut).
-      Switch to <strong>natural</strong> and repeat (soft VAD + short fade).
-      Tune <strong>Silence end wait</strong>: small values reply during short pauses; large values wait until you finish.
-      CAWA <code>last_action</code> should still become <code>interrupt</code> when busy.
-      Long-task button drives Tern only — Realtime can stay unavailable.
+      Default <strong>auto</strong> route skips small talk to CAWA so Coding Agent is not interrupt-starved.
+      Use <strong>always</strong> to replay the original barge-in demo. Context bridge injects short Tern status into Realtime (no auto-speak).
+      Demo work_dir is often a temp folder; agent sandbox may be read-only — see README.
     </p>
   </main>
   <script src="/static/app.js"></script>

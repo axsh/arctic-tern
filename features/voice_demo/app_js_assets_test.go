@@ -37,16 +37,62 @@ func TestAppJSResumesRemoteAudioAfterBargeIn(t *testing.T) {
 	if !strings.Contains(ensureBody, ".volume") {
 		t.Fatal("ensureRemoteAudioPlaying must restore .volume")
 	}
+	if !strings.Contains(ensureBody, "resumeLoggedForResponse") {
+		t.Fatal("ensureRemoteAudioPlaying must gate resume playback log with resumeLoggedForResponse")
+	}
 
 	if !strings.Contains(js, `input_audio_buffer.speech_started`) ||
 		!strings.Contains(js, "softenRemoteAudioOnBargeIn()") {
 		t.Fatal("speech_started must call softenRemoteAudioOnBargeIn()")
 	}
-	if !strings.Contains(js, "ensureRemoteAudioPlaying()") {
-		t.Fatal("assistant audio start must call ensureRemoteAudioPlaying()")
+	if !strings.Contains(js, "ensureRemoteAudioPlaying(") {
+		t.Fatal("assistant audio start must call ensureRemoteAudioPlaying(")
 	}
 	if !strings.Contains(js, "response.created") && !strings.Contains(js, "output_audio_buffer.started") {
 		t.Fatal("app.js must hook response.created or output_audio_buffer.started")
+	}
+}
+
+func TestAppJSActiveResponseCancelAndBridge(t *testing.T) {
+	path := filepath.Join("static", "app.js")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	js := string(raw)
+
+	if !strings.Contains(js, "function cancelActiveRealtimeResponse") {
+		t.Fatal("app.js missing cancelActiveRealtimeResponse")
+	}
+	cancelBody := functionBody(t, js, "cancelActiveRealtimeResponse")
+	if !strings.Contains(cancelBody, "response.cancel") {
+		t.Fatal("cancelActiveRealtimeResponse must send response.cancel")
+	}
+	if !strings.Contains(js, "realtimeResponseActive") {
+		t.Fatal("app.js must track realtimeResponseActive")
+	}
+	if !strings.Contains(js, `input_audio_buffer.speech_started`) ||
+		!strings.Contains(js, "cancelActiveRealtimeResponse()") {
+		t.Fatal("speech_started must call cancelActiveRealtimeResponse()")
+	}
+	if !strings.Contains(js, "conversation_already_has_active_response") {
+		t.Fatal("app.js must handle conversation_already_has_active_response")
+	}
+	if !strings.Contains(js, "function maybeBridgeSummary") {
+		t.Fatal("app.js missing maybeBridgeSummary")
+	}
+	bridgeBody := functionBody(t, js, "maybeBridgeSummary")
+	if !strings.Contains(bridgeBody, "conversation.item.create") {
+		t.Fatal("maybeBridgeSummary must create conversation.item")
+	}
+	if strings.Contains(bridgeBody, "response.create") {
+		t.Fatal("maybeBridgeSummary must not auto response.create")
+	}
+	if !strings.Contains(js, "route_mode") {
+		t.Fatal("app.js must post route_mode on utterance")
+	}
+	if !strings.Contains(js, "/api/realtime/voices") {
+		t.Fatal("app.js must load voices from /api/realtime/voices")
 	}
 }
 

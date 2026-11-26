@@ -4,9 +4,8 @@
 //   1) OpenAI Realtime = low-latency conversation audio (mic/speaker).
 //   2) Tern CAWA       = Coding Agent execution (messages / interrupt).
 //
-// Why CAWA interrupt stays immediate even in "natural" mode:
-//   natural only softens how assistant *audio* stops. Execution steering
-//   must still call Interrupt as soon as a busy-turn utterance is finalized.
+// Routing (auto/always/never) decides whether a transcript goes to CAWA.
+// Context bridge injects short CAWA summaries into the Realtime conversation.
 
 const LONG_TASK_SAMPLE =
   "Please run a long shell command that sleeps for about 60 seconds, then create a file named long_task_done.txt with the text done. Narrate briefly only.";
@@ -20,8 +19,17 @@ const els = {
   start: document.querySelector('[data-testid="btn-start"]'),
   end: document.querySelector('[data-testid="btn-end"]'),
   sample: document.querySelector('[data-testid="btn-sample-long"]'),
+  sendTern: document.querySelector('[data-testid="btn-send-tern"]'),
   mode: document.querySelector('[data-testid="bargein-mode"]'),
   stopLabel: document.querySelector('[data-testid="bargein-stop-label"]'),
+  routeMode: document.querySelector('[data-testid="cawa-route-mode"]'),
+  bridge: document.querySelector('[data-testid="context-bridge"]'),
+  voice: document.querySelector('[data-testid="realtime-voice"]'),
+  speed: document.querySelector('[data-testid="realtime-speed"]'),
+  outputApplied: document.querySelector('[data-testid="realtime-output-applied"]'),
+  speedSlow: document.querySelector('[data-testid="speed-preset-slow"]'),
+  speedNormal: document.querySelector('[data-testid="speed-preset-normal"]'),
+  speedFast: document.querySelector('[data-testid="speed-preset-fast"]'),
   vadSilence: document.querySelector('[data-testid="vad-silence-ms"]'),
   vadThreshold: document.querySelector('[data-testid="vad-threshold"]'),
   vadPrefix: document.querySelector('[data-testid="vad-prefix-ms"]'),
@@ -43,6 +51,10 @@ let localStream = null;
 let remoteAudio = null;
 let fadeMs = MODE_PARAMS.natural.fade_ms;
 let callActive = false;
+let lastYouLine = "";
+let lastBridgedSummary = "";
+let realtimeResponseActive = false;
+let resumeLoggedForResponse = false;
 
 function logLine(line) {
   els.transcript.textContent += line + "\n";
@@ -91,8 +103,39 @@ function showAppliedVAD(vad) {
   logLine("realtime> vad " + line);
 }
 
+function showAppliedOutput(out) {
+  if (!out) return;
+  const line = "voice=" + out.voice + " speed=" + out.speed;
+  els.outputApplied.textContent = line;
+  logLine("realtime> output " + line);
+}
+
 els.vadResponsive.addEventListener("click", () => setVADInputs(500, 0.5, 300));
 els.vadPatient.addEventListener("click", () => setVADInputs(1200, 0.5, 300));
+els.speedSlow.addEventListener("click", () => { els.speed.value = "0.8"; });
+els.speedNormal.addEventListener("click", () => { els.speed.value = "1"; });
+els.speedFast.addEventListener("click", () => { els.speed.value = "1.25"; });
+
+async function loadVoices() {
+  try {
+    const resp = await fetch("/api/realtime/voices");
+    const data = await resp.json();
+    if (!data.ok || !Array.isArray(data.voices)) return;
+    const cur = els.voice.value || data.default || "marin";
+    els.voice.innerHTML = "";
+    for (const v of data.voices) {
+      const opt = document.createElement("option");
+      opt.value = v.id;
+      opt.textContent = v.recommended ? v.label + " (recommended)" : v.label;
+      if (v.id === cur) opt.selected = true;
+      els.voice.appendChild(opt);
+    }
+  } catch (_) {
+    // keep fallback marin option from HTML
+  }
+}
+
+loadVoices();
 
 async function postJSON(path, body) {
   const resp = await fetch(path, {
@@ -105,6 +148,29 @@ async function postJSON(path, body) {
     throw new Error(data.error || path + " failed HTTP " + resp.status);
   }
   return data;
+}
+
+function maybeBridgeSummary(summary, bridgeNote) {
+  if (!els.bridge.checked || !dc || dc.readyState !== "open") return;
+  const s = (summary || "").trim();
+  if (!s || s === lastBridgedSummary) return;
+  lastBridgedSummary = s;
+  const note = (bridgeNote && String(bridgeNote).trim()) ||
+    ("Tern coding agent status: " + s);
+  const ev = {
+    type: "conversation.item.create",
+    item: {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: note }],
+    },
+  };
+  try {
+    dc.send(JSON.stringify(ev));
+    logLine("bridge> tern status: " + s);
+  } catch (err) {
+    logLine("bridge-error> " + err.message);
+  }
 }
 
 async function refreshCawaStatus() {
@@ -122,20 +188,25 @@ async function refreshCawaStatus() {
   els.action.textContent = data.last_action || "—";
   els.interruptMode.textContent = data.interrupt_mode || "—";
   els.summary.textContent = data.last_summary || "—";
+  if (data.last_summary) maybeBridgeSummary(data.last_summary, data.bridge_note);
 }
 
-async function sendUtterance(text) {
+async function sendUtterance(text, routeOverride) {
   const trimmed = (text || "").trim();
   if (!trimmed) return;
+  lastYouLine = trimmed;
   logLine("you> " + trimmed);
-  const data = await postJSON("/api/utterance", { text: trimmed });
-  logLine("cawa> action=" + data.action + " summary=" + (data.summary || ""));
+  const route_mode = routeOverride || els.routeMode.value || "auto";
+  const data = await postJSON("/api/utterance", { text: trimmed, route_mode });
+  if (data.sent === false) {
+    logLine("route> skip cawa (" + (data.reason || "skip") + ")");
+  } else {
+    logLine("cawa> action=" + data.action + " summary=" + (data.summary || "") + " reason=" + (data.reason || ""));
+    maybeBridgeSummary(data.summary || data.last_summary, data.bridge_note);
+  }
   await refreshCawaStatus();
 }
 
-// Soften assistant playback on barge-in without pausing the <audio> element.
-// pause() leaves the element stopped; later Realtime audio never becomes audible
-// until play() runs again — which we do in ensureRemoteAudioPlaying.
 function softenRemoteAudioOnBargeIn() {
   if (!remoteAudio) return;
   if (!fadeMs || fadeMs <= 0) {
@@ -153,14 +224,25 @@ function softenRemoteAudioOnBargeIn() {
   }, stepMs);
 }
 
-function ensureRemoteAudioPlaying() {
+function ensureRemoteAudioPlaying(logResume) {
   if (!remoteAudio) return;
   remoteAudio.volume = 1;
   const p = remoteAudio.play();
   if (p && typeof p.catch === "function") {
     p.catch(() => {});
   }
-  logLine("realtime> resume playback");
+  if (logResume && !resumeLoggedForResponse) {
+    resumeLoggedForResponse = true;
+    logLine("realtime> resume playback");
+  }
+}
+
+function cancelActiveRealtimeResponse() {
+  if (!dc || dc.readyState !== "open") return;
+  if (!realtimeResponseActive) return;
+  try {
+    dc.send(JSON.stringify({ type: "response.cancel" }));
+  } catch (_) {}
 }
 
 async function connectRealtime() {
@@ -172,14 +254,15 @@ async function connectRealtime() {
     silence_duration_ms: vadReq.silence_duration_ms,
     threshold: vadReq.threshold,
     prefix_padding_ms: vadReq.prefix_padding_ms,
+    voice: els.voice.value || "marin",
+    speed: Number(els.speed.value) || 1,
   });
   if (wrapped.barge_in) {
     fadeMs = wrapped.barge_in.fade_ms || 0;
     els.stopLabel.textContent = wrapped.barge_in.stop_label || els.stopLabel.textContent;
   }
-  if (wrapped.vad) {
-    showAppliedVAD(wrapped.vad);
-  }
+  if (wrapped.vad) showAppliedVAD(wrapped.vad);
+  if (wrapped.output) showAppliedOutput(wrapped.output);
   const secret = wrapped.openai || wrapped;
   const ephemeral =
     secret.value ||
@@ -203,6 +286,8 @@ async function connectRealtime() {
     setRealtimeStatus("speaking");
   };
 
+  realtimeResponseActive = false;
+  resumeLoggedForResponse = false;
   dc = pc.createDataChannel("oai-events");
   dc.onmessage = (ev) => {
     let msg;
@@ -212,24 +297,41 @@ async function connectRealtime() {
       return;
     }
     if (msg.type === "input_audio_buffer.speech_started") {
-      // Soften assistant playback on barge-in (natural fades; abrupt mutes).
-      // Do not pause() — that permanently silences later assistant audio.
       softenRemoteAudioOnBargeIn();
+      cancelActiveRealtimeResponse();
       setRealtimeStatus("connected");
     }
     if (msg.type === "conversation.item.input_audio_transcription.completed") {
       const transcript = msg.transcript || "";
       sendUtterance(transcript).catch((err) => logLine("error> " + err.message));
     }
-    if (msg.type === "response.created" || msg.type === "output_audio_buffer.started") {
-      ensureRemoteAudioPlaying();
+    if (msg.type === "response.created") {
+      realtimeResponseActive = true;
+      resumeLoggedForResponse = false;
+      ensureRemoteAudioPlaying(true);
       setRealtimeStatus("speaking");
     }
-    if (msg.type === "response.done" || msg.type === "output_audio_buffer.stopped") {
+    if (msg.type === "output_audio_buffer.started") {
+      ensureRemoteAudioPlaying(false);
+      setRealtimeStatus("speaking");
+    }
+    if (
+      msg.type === "response.done" ||
+      msg.type === "response.cancelled" ||
+      msg.type === "output_audio_buffer.stopped"
+    ) {
+      if (msg.type === "response.done" || msg.type === "response.cancelled") {
+        realtimeResponseActive = false;
+      }
       if (els.realtime.textContent === "speaking") setRealtimeStatus("connected");
     }
     if (msg.type === "error") {
-      logLine("realtime-error> " + JSON.stringify(msg.error || msg));
+      const err = msg.error || msg;
+      logLine("realtime-error> " + JSON.stringify(err));
+      if (err && err.code === "conversation_already_has_active_response") {
+        cancelActiveRealtimeResponse();
+        maybeBridgeSummary("Realtime: active response conflict");
+      }
     }
   };
 
@@ -276,6 +378,7 @@ function stopRealtime() {
     remoteAudio.remove();
     remoteAudio = null;
   }
+  realtimeResponseActive = false;
 }
 
 els.start.addEventListener("click", async () => {
@@ -283,6 +386,7 @@ els.start.addEventListener("click", async () => {
   try {
     await postJSON("/api/call/start", {});
     callActive = true;
+    lastBridgedSummary = "";
     setCawaStatus("idle");
     logLine("cawa> session started");
     try {
@@ -294,6 +398,7 @@ els.start.addEventListener("click", async () => {
     }
     els.end.disabled = false;
     els.sample.disabled = false;
+    els.sendTern.disabled = false;
     statusTimer = setInterval(() => {
       refreshCawaStatus().catch(() => {});
     }, 1000);
@@ -319,12 +424,25 @@ els.end.addEventListener("click", async () => {
   els.start.disabled = false;
   els.end.disabled = true;
   els.sample.disabled = true;
+  els.sendTern.disabled = true;
   await refreshCawaStatus();
 });
 
 els.sample.addEventListener("click", async () => {
   try {
-    await sendUtterance(LONG_TASK_SAMPLE);
+    await sendUtterance(LONG_TASK_SAMPLE, "always");
+  } catch (err) {
+    logLine("error> " + err.message);
+  }
+});
+
+els.sendTern.addEventListener("click", async () => {
+  try {
+    if (!lastYouLine) {
+      logLine("system> no last user line to send");
+      return;
+    }
+    await sendUtterance(lastYouLine, "always");
   } catch (err) {
     logLine("error> " + err.message);
   }

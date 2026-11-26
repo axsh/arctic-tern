@@ -85,6 +85,14 @@ button#btnSampleLong {
   font-size: 0.9rem;
 }
 
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .vad-row {
   margin: 0 0 1.25rem;
   padding: 1rem;
