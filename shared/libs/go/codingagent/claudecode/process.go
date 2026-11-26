@@ -32,6 +32,8 @@ type ProcessManager struct {
 	stderrBuf   *bytes.Buffer
 	stdinWriter io.WriteCloser
 	stdinMu     sync.Mutex
+	stopOnce    sync.Once
+	stopErr     error
 }
 
 // WriteStdin writes additional input to the running CLI process.
@@ -383,12 +385,23 @@ func emitTimeout(ch chan<- codingagent.StreamEvent, ctx context.Context, msg str
 }
 
 // Stop gracefully terminates the subprocess.
+// It is safe to call more than once; the kill path runs at most once.
 // 1. Send SIGTERM (Unix) or Kill (Windows)
 // 2. Wait up to 5 seconds for exit
 // 3. Force kill if timeout
 func (pm *ProcessManager) Stop() error {
+	if pm == nil {
+		return nil
+	}
+	pm.stopOnce.Do(func() {
+		pm.stopErr = pm.stopOnceBody()
+	})
+	return pm.stopErr
+}
+
+func (pm *ProcessManager) stopOnceBody() error {
 	pm.closeStdin()
-	if pm.cmd.Process == nil {
+	if pm.cmd == nil || pm.cmd.Process == nil {
 		return nil
 	}
 
@@ -409,7 +422,9 @@ func (pm *ProcessManager) Stop() error {
 		if killErr := killCmd.Run(); killErr != nil {
 			pm.logger.Debug("process cleanup: attempted precautionary kill, but process had already exited", "pid", pid)
 		}
-		pm.cancel()
+		if pm.cancel != nil {
+			pm.cancel()
+		}
 		return nil
 	}
 
@@ -425,7 +440,9 @@ func (pm *ProcessManager) Stop() error {
 	case <-time.After(gracefulShutdownTimeout):
 		// Force kill
 		pm.logger.Debug("graceful shutdown timed out, killing process")
-		pm.cancel()
+		if pm.cancel != nil {
+			pm.cancel()
+		}
 		return <-done
 	}
 }

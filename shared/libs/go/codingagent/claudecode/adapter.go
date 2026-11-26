@@ -35,6 +35,24 @@ func New(config *codingagent.AdapterConfig) *ClaudeCodeAdapter {
 // Name returns "claudecode".
 func (a *ClaudeCodeAdapter) Name() string { return "claudecode" }
 
+func (a *ClaudeCodeAdapter) track(pm *ProcessManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.procs = append(a.procs, pm)
+}
+
+func (a *ClaudeCodeAdapter) untrack(pm *ProcessManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i, p := range a.procs {
+		if p == pm {
+			a.procs = append(a.procs[:i], a.procs[i+1:]...)
+			a.logger.Debug("untracked claude process", "remaining", len(a.procs))
+			return
+		}
+	}
+}
+
 // CreateSession starts a new Claude Code session by launching the CLI subprocess.
 func (a *ClaudeCodeAdapter) CreateSession(
 	ctx context.Context, opts ...codingagent.SessionOption,
@@ -55,24 +73,30 @@ func (a *ClaudeCodeAdapter) CreateSession(
 		return nil, fmt.Errorf("claudecode: create session: %w", err)
 	}
 
-	a.mu.Lock()
-	a.procs = append(a.procs, pm)
-	a.mu.Unlock()
+	a.track(pm)
 
 	sid := fmt.Sprintf("claude-%d", pm.cmd.Process.Pid)
 	a.logger.Debug("claude code session created", "session_id", sid)
-	return &claudeSession{id: sid, ch: ch, pm: pm}, nil
+	return &claudeSession{
+		id: sid,
+		ch: ch,
+		pm: pm,
+		closeHook: func() {
+			a.untrack(pm)
+		},
+	}, nil
 }
 
-// Close stops all active processes and releases resources.
+// Close stops tracked processes and releases resources.
 func (a *ClaudeCodeAdapter) Close() error {
-	a.logger.Debug("closing claude code adapter")
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, pm := range a.procs {
-		pm.Stop()
-	}
+	pending := append([]*ProcessManager(nil), a.procs...)
 	a.procs = nil
+	a.mu.Unlock()
+	a.logger.Debug("closing claude code adapter", "pending", len(pending))
+	for _, pm := range pending {
+		_ = pm.Stop()
+	}
 	return nil
 }
 
@@ -83,9 +107,11 @@ func (a *ClaudeCodeAdapter) SetGatewayToken(token string) {
 
 // claudeSession is a Claude Code Session implementation.
 type claudeSession struct {
-	id string
-	ch <-chan codingagent.StreamEvent
-	pm *ProcessManager
+	id        string
+	ch        <-chan codingagent.StreamEvent
+	pm        *ProcessManager
+	closed    sync.Once
+	closeHook func()
 }
 
 // Send returns the streaming event channel.
@@ -98,7 +124,16 @@ func (s *claudeSession) Send(_ context.Context, _ string) (<-chan codingagent.St
 func (s *claudeSession) ID() string { return s.id }
 
 // Close terminates the session and stops the subprocess.
-func (s *claudeSession) Close() error { return s.pm.Stop() }
+func (s *claudeSession) Close() error {
+	var err error
+	s.closed.Do(func() {
+		err = s.pm.Stop()
+		if s.closeHook != nil {
+			s.closeHook()
+		}
+	})
+	return err
+}
 
 // WriteStdin writes additional input to the running Claude process.
 func (s *claudeSession) WriteStdin(text string) error { return s.pm.WriteStdin(text) }
