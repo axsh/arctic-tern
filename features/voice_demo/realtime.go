@@ -17,7 +17,8 @@ var openAIRealtimeClientSecretsURL = "https://api.openai.com/v1/realtime/client_
 // createRealtimeEphemeralSession asks OpenAI for a short-lived Realtime client secret.
 // barge controls whether assistant audio is hard-interrupted on user speech
 // (abrupt) or soft (natural: interrupt_response=false).
-func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice string, barge BargeInParams) ([]byte, error) {
+// vad controls how long mid-utterance silence is tolerated before the model replies.
+func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice string, barge BargeInParams, vad VADParams) ([]byte, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("OPENAI_API_KEY is not set")
 	}
@@ -29,6 +30,9 @@ func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice st
 	}
 	if barge.Mode == "" {
 		barge = ResolveBargeIn("natural")
+	}
+	if vad.SilenceDurationMs == 0 && vad.PrefixPaddingMs == 0 && vad.Threshold == 0 {
+		vad = ResolveVAD(VADInput{})
 	}
 
 	payload := map[string]any{
@@ -47,9 +51,13 @@ func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice st
 					},
 					// turn_detection.interrupt_response: when true, user speech
 					// immediately cancels assistant audio (abrupt). natural sets false.
+					// silence_duration_ms: wait through mid-utterance pauses before end-of-turn.
 					"turn_detection": map[string]any{
-						"type":               "server_vad",
-						"interrupt_response": barge.InterruptResponse,
+						"type":                 "server_vad",
+						"interrupt_response":   barge.InterruptResponse,
+						"silence_duration_ms":  vad.SilenceDurationMs,
+						"threshold":            vad.Threshold,
+						"prefix_padding_ms":    vad.PrefixPaddingMs,
 					},
 				},
 				"output": map[string]any{

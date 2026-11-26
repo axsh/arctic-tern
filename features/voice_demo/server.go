@@ -107,12 +107,25 @@ func (a *demoApp) handleCallEnd(w http.ResponseWriter, r *http.Request) {
 
 func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BargeInMode string `json:"barge_in_mode"`
+		BargeInMode       string   `json:"barge_in_mode"`
+		SilenceDurationMs *int     `json:"silence_duration_ms"`
+		Threshold         *float64 `json:"threshold"`
+		PrefixPaddingMs   *int     `json:"prefix_padding_ms"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	barge := ResolveBargeIn(req.BargeInMode)
+	vad := ResolveVAD(VADInput{
+		SilenceDurationMs: req.SilenceDurationMs,
+		Threshold:         req.Threshold,
+		PrefixPaddingMs:   req.PrefixPaddingMs,
+	})
+	vadEcho := map[string]any{
+		"silence_duration_ms": vad.SilenceDurationMs,
+		"threshold":           vad.Threshold,
+		"prefix_padding_ms":   vad.PrefixPaddingMs,
+	}
 
-	raw, err := createRealtimeEphemeralSession(r.Context(), a.openaiKey, "", "", barge)
+	raw, err := createRealtimeEphemeralSession(r.Context(), a.openaiKey, "", "", barge, vad)
 	if err != nil {
 		status := http.StatusBadGateway
 		if err.Error() == "OPENAI_API_KEY is not set" {
@@ -123,6 +136,7 @@ func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) 
 			"barge_in": map[string]any{
 				"mode": string(barge.Mode), "stop_label": barge.StopLabel, "fade_ms": barge.FadeMs,
 			},
+			"vad": vadEcho,
 		})
 		return
 	}
@@ -138,6 +152,7 @@ func (a *demoApp) handleRealtimeSession(w http.ResponseWriter, r *http.Request) 
 			"mode": string(barge.Mode), "stop_label": barge.StopLabel, "fade_ms": barge.FadeMs,
 			"interrupt_response": barge.InterruptResponse,
 		},
+		"vad": vadEcho,
 	})
 }
 

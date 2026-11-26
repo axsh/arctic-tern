@@ -85,6 +85,50 @@ button#btnSampleLong {
   font-size: 0.9rem;
 }
 
+.vad-row {
+  margin: 0 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.vad-row legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+
+.vad-note {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.vad-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.vad-controls label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.vad-controls input {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  background: var(--bg, #fff);
+  color: inherit;
+}
+
+.vad-presets {
+  margin-bottom: 0.5rem;
+}
+
 .mode-row select {
   font: inherit;
   padding: 0.35rem 0.5rem;

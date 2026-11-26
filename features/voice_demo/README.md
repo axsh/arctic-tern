@@ -31,10 +31,12 @@ curl -s http://127.0.0.1:3100/health
 
 ## 2. Start voice_demo
 
-Rebuild after pulling changes (old binaries still call deprecated `/v1/realtime/sessions`):
+Rebuild after pulling changes (old binaries still call deprecated `/v1/realtime/sessions`).
+`voice_demo` is its **own Go module** (`features/voice_demo/go.mod`), so build from that directory (or use `./scripts/process/build.sh`):
 
 ```bash
-go build -o bin/voice_demo ./features/voice_demo
+# from repo root
+go build -C features/voice_demo -o ../../bin/voice_demo .
 
 export TERN_URL="http://127.0.0.1:3100"
 export TERN_AGENT="wayfinder"
@@ -65,12 +67,25 @@ If Realtime is `unavailable` but you click **Send long-task text**, only the Ter
 
 Compare by ear: abrupt first, then natural. CAWA `last_action` should still show `interrupt` when the agent was busy.
 
+## Turn-end wait (VAD)
+
+UI knobs map to Realtime `server_vad` and apply on **next Start / Realtime connect** (not live mid-call):
+
+| Control | Default | Effect |
+| :--- | ---: | :--- |
+| Silence end wait (ms) | 900 | Longer = wait through mid-utterance pauses before the model replies |
+| Sensitivity threshold | 0.5 | Higher = less sensitive to quiet speech |
+| Prefix padding (ms) | 300 | Audio kept before detected speech start |
+
+Presets: **Responsive (500ms)** vs **Patient (1200ms)**. Applied values show under the controls and in the transcript (`realtime> vad ...`).
+
 ## Manual scenarios
 
-1. Start call — Realtime panel becomes connected (or unavailable); CAWA becomes idle.
+1. Start call — Realtime panel becomes connected (or unavailable); CAWA becomes idle; `vad-applied` shows clamped values.
 2. Speak a short greeting — transcript shows `you>`; **assistant voice must be audible** after barge-in (if silent, check that barge-in softens volume but does not leave `<audio>` paused).
-3. Long-task button — CAWA busy; Realtime may stay unavailable.
-4. Barge-in while busy — CAWA last_action=`interrupt`; compare abrupt vs natural audio; assistant voice must resume after the next Realtime response.
+3. Compare silence 300 vs 1200 (End call, change slider, Start again) — short pauses should trigger replies less often at 1200.
+4. Long-task button — CAWA busy; Realtime may stay unavailable.
+5. Barge-in while busy — CAWA last_action=`interrupt`; compare abrupt vs natural audio; assistant voice must resume after the next Realtime response.
 
 ## Environment
 

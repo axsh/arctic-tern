@@ -33,6 +33,30 @@
       <span>stop technique: <code data-testid="bargein-stop-label" id="bargeinStopLabel">soft_vad+fade</code></span>
     </div>
 
+    <fieldset class="vad-row">
+      <legend>Turn-end wait (OpenAI server_vad)</legend>
+      <p class="vad-note">Applies on next Realtime connect (Start call). Larger silence waits through mid-utterance pauses.</p>
+      <div class="vad-controls">
+        <label>
+          Silence end wait (ms)
+          <input type="number" data-testid="vad-silence-ms" id="vadSilenceMs" min="200" max="2000" step="50" value="900" />
+        </label>
+        <label>
+          Sensitivity threshold
+          <input type="number" data-testid="vad-threshold" id="vadThreshold" min="0" max="1" step="0.05" value="0.5" />
+        </label>
+        <label>
+          Prefix padding (ms)
+          <input type="number" data-testid="vad-prefix-ms" id="vadPrefixMs" min="0" max="1000" step="50" value="300" />
+        </label>
+      </div>
+      <div class="row vad-presets">
+        <button type="button" data-testid="vad-preset-responsive" id="vadPresetResponsive">Responsive (500ms)</button>
+        <button type="button" data-testid="vad-preset-patient" id="vadPresetPatient">Patient (1200ms)</button>
+      </div>
+      <p>Applied on last connect: <code data-testid="vad-applied" id="vadApplied">—</code></p>
+    </fieldset>
+
     <div class="layers">
       <section class="layer" aria-labelledby="realtime-heading">
         <h2 id="realtime-heading">OpenAI Realtime</h2>
@@ -77,6 +101,7 @@
     <p class="hint">
       Compare modes: set <strong>abrupt</strong>, let the assistant speak, then barge in (hard cut).
       Switch to <strong>natural</strong> and repeat (soft VAD + short fade).
+      Tune <strong>Silence end wait</strong>: small values reply during short pauses; large values wait until you finish.
       CAWA <code>last_action</code> should still become <code>interrupt</code> when busy.
       Long-task button drives Tern only — Realtime can stay unavailable.
     </p>

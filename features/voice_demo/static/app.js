@@ -22,6 +22,12 @@ const els = {
   sample: document.querySelector('[data-testid="btn-sample-long"]'),
   mode: document.querySelector('[data-testid="bargein-mode"]'),
   stopLabel: document.querySelector('[data-testid="bargein-stop-label"]'),
+  vadSilence: document.querySelector('[data-testid="vad-silence-ms"]'),
+  vadThreshold: document.querySelector('[data-testid="vad-threshold"]'),
+  vadPrefix: document.querySelector('[data-testid="vad-prefix-ms"]'),
+  vadApplied: document.querySelector('[data-testid="vad-applied"]'),
+  vadResponsive: document.querySelector('[data-testid="vad-preset-responsive"]'),
+  vadPatient: document.querySelector('[data-testid="vad-preset-patient"]'),
   realtime: document.querySelector('[data-testid="status-realtime"]'),
   cawa: document.querySelector('[data-testid="status-cawa"]'),
   action: document.querySelector('[data-testid="last-action"]'),
@@ -60,6 +66,33 @@ function syncModeLabel() {
 
 els.mode.addEventListener("change", syncModeLabel);
 syncModeLabel();
+
+function readVADFromUI() {
+  return {
+    silence_duration_ms: Number(els.vadSilence.value),
+    threshold: Number(els.vadThreshold.value),
+    prefix_padding_ms: Number(els.vadPrefix.value),
+  };
+}
+
+function setVADInputs(silenceMs, threshold, prefixMs) {
+  els.vadSilence.value = String(silenceMs);
+  els.vadThreshold.value = String(threshold);
+  els.vadPrefix.value = String(prefixMs);
+}
+
+function showAppliedVAD(vad) {
+  if (!vad) return;
+  const line =
+    "silence=" + vad.silence_duration_ms +
+    "ms threshold=" + vad.threshold +
+    " prefix=" + vad.prefix_padding_ms + "ms";
+  els.vadApplied.textContent = line;
+  logLine("realtime> vad " + line);
+}
+
+els.vadResponsive.addEventListener("click", () => setVADInputs(500, 0.5, 300));
+els.vadPatient.addEventListener("click", () => setVADInputs(1200, 0.5, 300));
 
 async function postJSON(path, body) {
   const resp = await fetch(path, {
@@ -133,10 +166,19 @@ function ensureRemoteAudioPlaying() {
 async function connectRealtime() {
   setRealtimeStatus("connecting");
   const mode = els.mode.value || "natural";
-  const wrapped = await postJSON("/api/realtime/session", { barge_in_mode: mode });
+  const vadReq = readVADFromUI();
+  const wrapped = await postJSON("/api/realtime/session", {
+    barge_in_mode: mode,
+    silence_duration_ms: vadReq.silence_duration_ms,
+    threshold: vadReq.threshold,
+    prefix_padding_ms: vadReq.prefix_padding_ms,
+  });
   if (wrapped.barge_in) {
     fadeMs = wrapped.barge_in.fade_ms || 0;
     els.stopLabel.textContent = wrapped.barge_in.stop_label || els.stopLabel.textContent;
+  }
+  if (wrapped.vad) {
+    showAppliedVAD(wrapped.vad);
   }
   const secret = wrapped.openai || wrapped;
   const ephemeral =
