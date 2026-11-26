@@ -94,17 +94,21 @@ func (s *turnInterruptSession) Send(ctx context.Context, prompt string) (<-chan 
 
 // newTurnInterruptHTTP builds an httptest server fronting a turnInterruptAgent,
 // mirroring the deterministic mock-agent setup used by other integration tests.
-func newTurnInterruptHTTP(t *testing.T, agent *turnInterruptAgent) *httptest.Server {
+// WorkDir and SessionDir are created before the server cleanup is registered so
+// ts.Close runs before t.TempDir removal (Windows cannot delete locked history files).
+func newTurnInterruptHTTP(t *testing.T, agent *turnInterruptAgent) (ts *httptest.Server, workDir, sessionDir string) {
 	t.Helper()
+	workDir = t.TempDir()
+	sessionDir = t.TempDir()
 	srv := agentservice.New(
 		agentservice.WithTaskLog(tasklog.New()),
 		agentservice.WithProcessRetry(config.ProcessRetryConfig{MaxAttempts: 1}),
 		agentservice.WithToolHeartbeatInterval(0),
 	)
 	srv.RegisterAgent(agent)
-	ts := httptest.NewServer(srv.HTTPHandler())
+	ts = httptest.NewServer(srv.HTTPHandler())
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, workDir, sessionDir
 }
 
 // readStreamUntilToolUse consumes events from ch until a tool_use event is seen.
@@ -124,14 +128,14 @@ func readStreamUntilToolUse(t *testing.T, ch <-chan v1.Event) {
 
 func TestTurnInterrupt_ClientV1RedirectsInFlightTurn(t *testing.T) {
 	agent := &turnInterruptAgent{name: "codex"}
-	ts := newTurnInterruptHTTP(t, agent)
+	ts, workDir, sessionDir := newTurnInterruptHTTP(t, agent)
 	client := v1.New(ts.URL, v1.WithNoTimeout())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	sess, err := client.CreateSession(ctx, v1.SessionRequest{
-		Agent: "codex", WorkDir: t.TempDir(), SessionDir: t.TempDir(),
+		Agent: "codex", WorkDir: workDir, SessionDir: sessionDir,
 	})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
@@ -214,14 +218,14 @@ func TestTurnInterrupt_ClientV1RedirectsInFlightTurn(t *testing.T) {
 
 func TestTurnInterrupt_CanonicalHistoryOrder(t *testing.T) {
 	agent := &turnInterruptAgent{name: "codex"}
-	ts := newTurnInterruptHTTP(t, agent)
+	ts, workDir, sessionDir := newTurnInterruptHTTP(t, agent)
 	client := v1.New(ts.URL, v1.WithNoTimeout())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	sess, err := client.CreateSession(ctx, v1.SessionRequest{
-		Agent: "codex", WorkDir: t.TempDir(), SessionDir: t.TempDir(),
+		Agent: "codex", WorkDir: workDir, SessionDir: sessionDir,
 	})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
@@ -285,14 +289,14 @@ func TestTurnInterrupt_CanonicalHistoryOrder(t *testing.T) {
 
 func TestTurnInterrupt_IdleSessionClientError(t *testing.T) {
 	agent := &turnInterruptAgent{name: "codex"}
-	ts := newTurnInterruptHTTP(t, agent)
+	ts, workDir, sessionDir := newTurnInterruptHTTP(t, agent)
 	client := v1.New(ts.URL, v1.WithNoTimeout())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	sess, err := client.CreateSession(ctx, v1.SessionRequest{
-		Agent: "codex", WorkDir: t.TempDir(), SessionDir: t.TempDir(),
+		Agent: "codex", WorkDir: workDir, SessionDir: sessionDir,
 	})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
@@ -312,14 +316,14 @@ func TestTurnInterrupt_IdleSessionClientError(t *testing.T) {
 
 func TestTurnInterrupt_FollowSeesReplanTurn(t *testing.T) {
 	agent := &turnInterruptAgent{name: "codex", replanDelay: 300 * time.Millisecond}
-	ts := newTurnInterruptHTTP(t, agent)
+	ts, workDir, sessionDir := newTurnInterruptHTTP(t, agent)
 	client := v1.New(ts.URL, v1.WithNoTimeout())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	sess, err := client.CreateSession(ctx, v1.SessionRequest{
-		Agent: "codex", WorkDir: t.TempDir(), SessionDir: t.TempDir(),
+		Agent: "codex", WorkDir: workDir, SessionDir: sessionDir,
 	})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
@@ -452,22 +456,24 @@ func (s *nativeTurnInterruptSession) InterruptTurn(_ context.Context, _ string) 
 	return cont, nil
 }
 
-func newNativeInterruptHTTP(t *testing.T, agent *nativeTurnInterruptAgent) *httptest.Server {
+func newNativeInterruptHTTP(t *testing.T, agent *nativeTurnInterruptAgent) (ts *httptest.Server, workDir, sessionDir string) {
 	t.Helper()
+	workDir = t.TempDir()
+	sessionDir = t.TempDir()
 	srv := agentservice.New(
 		agentservice.WithTaskLog(tasklog.New()),
 		agentservice.WithProcessRetry(config.ProcessRetryConfig{MaxAttempts: 1}),
 		agentservice.WithToolHeartbeatInterval(0),
 	)
 	srv.RegisterAgent(agent)
-	ts := httptest.NewServer(srv.HTTPHandler())
+	ts = httptest.NewServer(srv.HTTPHandler())
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, workDir, sessionDir
 }
 
 func TestTurnInterrupt_ClientV1NativeStub(t *testing.T) {
 	agent := &nativeTurnInterruptAgent{name: "codex"}
-	ts := newNativeInterruptHTTP(t, agent)
+	ts, workDir, sessionDir := newNativeInterruptHTTP(t, agent)
 	client := v1.New(ts.URL, v1.WithNoTimeout())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -493,7 +499,7 @@ func TestTurnInterrupt_ClientV1NativeStub(t *testing.T) {
 	}
 
 	sess, err := client.CreateSession(ctx, v1.SessionRequest{
-		Agent: "codex", WorkDir: t.TempDir(), SessionDir: t.TempDir(),
+		Agent: "codex", WorkDir: workDir, SessionDir: sessionDir,
 	})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
