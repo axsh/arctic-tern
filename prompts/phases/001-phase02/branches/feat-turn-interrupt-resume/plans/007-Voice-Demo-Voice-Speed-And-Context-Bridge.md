@@ -72,10 +72,10 @@ func DecideUtteranceRoute(busy bool, text, mode string) (send bool, action Actio
 
 ## Step-by-Step Implementation Guide
 
-1. **[ ]** RED/GREEN: voices, output_audio, context_bridge, route_policy (+tests)
-2. **[ ]** Wire realtime.go + server handlers + utterance route
-3. **[ ]** Update HTML/CSS/app.js + static/app.js contracts
-4. **[ ]** README; Verification; 総合判定; far-knowledge; push
+1. **[x]** RED/GREEN: voices, output_audio, context_bridge, route_policy (+tests)
+2. **[x]** Wire realtime.go + server handlers + utterance route
+3. **[x]** Update HTML/CSS/app.js + static/app.js contracts
+4. **[x]** README; Verification; 総合判定; far-knowledge; push
 
 ## Verification Plan
 
@@ -92,8 +92,8 @@ func DecideUtteranceRoute(busy bool, text, mode string) (send bool, action Actio
 
 | 試験 | 想定レッド | 実際 |
 | :--- | :--- | :--- |
-| TestDecideUtteranceRoute | 未定義 | （実装時） |
-| TestVoicesHandler | 未定義 | （実装時） |
+| TestDecideUtteranceRoute | 未定義 | GREEN（実装後 `go test -C features/voice_demo`） |
+| TestVoicesHandler | 未定義 | GREEN（同上） |
 
 ### Automated Verification
 
@@ -104,9 +104,14 @@ func DecideUtteranceRoute(busy bool, text, mode string) (send bool, action Actio
 
 E2E Playwright 不要: Example 埋め込み UI。契約は feature 内 Go 試験。
 
+実行結果（2026-11-26）:
+* `./scripts/process/build.sh` — PASS
+* `./scripts/process/integration_test.sh --specify 'TestTurnInterrupt_'` — PASS（6 件）
+* `go test -C features/voice_demo ./...` — PASS
+
 ### 総合判定結果
 
-（実装後記入）
+**合格**。M1–M8 / S1–S4 を実装し、feature 単体・全体ビルド・`TestTurnInterrupt_` が通った。
 
 ## Documentation
 
