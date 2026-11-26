@@ -2,54 +2,81 @@
 
 Browser demo that pairs **OpenAI Realtime** (conversation audio) with **Tern CAWA** (Coding Agent execution).
 
-This is **not** the production Voice Mediator. It is a commented Example so you can feel low-latency voice and verify that barge-in uses `interrupt` (not `cancel` → `messages`).
+This is **not** the production Voice Mediator. It is a commented Example so you can feel low-latency voice, see which layer is active, and compare **natural** vs **abrupt** barge-in audio.
 
-## Prerequisites
+## What you need (two processes)
 
-1. A running Tern with CAWA HTTP reachable (agent-service base URL).
-2. Optional for mic/speaker: `OPENAI_API_KEY` (Realtime ephemeral sessions).
-3. An available Coding Agent name (default `wayfinder`).
+`voice_demo` does **not** start Tern by itself.
 
-## Run
+```text
+Terminal A:  ./bin/tern          → CAWA at http://127.0.0.1:3100
+Terminal B:  voice_demo          → UI at     http://127.0.0.1:8787
+```
 
-From the repository root:
+## 1. Start Tern (CAWA)
 
 ```bash
-export TERN_URL="http://127.0.0.1:<agentservice-port>"
-export OPENAI_API_KEY="sk-..."   # optional; without it, use the long-task button
-go run ./features/voice_demo -listen :8787
+./scripts/process/build.sh
+export TERN_VAULT_OPENAI_DEFAULT="sk-..."        # if needed for agents
+export TERN_VAULT_ANTHROPIC_PRIMARY="sk-ant-..." # if needed
+./bin/tern --config ./settings/demo/config.yaml
+```
+
+Default CAWA URL: `http://127.0.0.1:3100` (`agent_service.port`).
+
+```bash
+curl -s http://127.0.0.1:3100/health
+./bin/ternctl agents
+```
+
+## 2. Start voice_demo
+
+Rebuild after pulling changes (old binaries still call deprecated `/v1/realtime/sessions`):
+
+```bash
+go build -o bin/voice_demo ./features/voice_demo
+
+export TERN_URL="http://127.0.0.1:3100"
+export TERN_AGENT="wayfinder"
+export OPENAI_API_KEY="sk-..."   # optional; without it use long-task button
+
+./bin/voice_demo -listen :8787
 ```
 
 Open `http://127.0.0.1:8787`.
 
-`./scripts/process/build.sh` also builds `bin/voice_demo`.
+Realtime uses `POST /v1/realtime/client_secrets` then browser `POST /v1/realtime/calls`.
 
-## Policy (why interrupt)
+## Where to look: OpenAI vs Tern
 
-| CAWA state | User utterance | Demo calls |
+| Panel | Meaning |
+| :--- | :--- |
+| **OpenAI Realtime** | Voice conversation. `disconnected` / `connecting` / `connected` / `speaking` / `unavailable` |
+| **Tern CAWA** | Coding Agent. `no session` / `idle` / `busy`, plus last action (`messages` / `interrupt`) |
+
+If Realtime is `unavailable` but you click **Send long-task text**, only the Tern panel should move to `busy`. That proves Tern works without OpenAI voice.
+
+## Barge-in modes
+
+| Mode | Assistant audio on user barge-in | CAWA when busy |
 | :--- | :--- | :--- |
-| idle | finalized text | `Session.SendText` (`messages`) |
-| busy | barge-in text | `Session.Interrupt` |
-| busy | — | never `CancelTurn` as the default barge-in |
+| **natural** (default) | soft VAD (`interrupt_response=false`) + short fade | immediate `interrupt` |
+| **abrupt** | hard cut (`interrupt_response=true`, no fade) | immediate `interrupt` |
+
+Compare by ear: abrupt first, then natural. CAWA `last_action` should still show `interrupt` when the agent was busy.
 
 ## Manual scenarios
 
-1. **Basic call** — Start call, allow mic, say a short greeting. Realtime should answer without waiting for a coding turn to finish.
-2. **Idle → messages** — Ask the agent to create a small file. UI shows busy, then a short summary.
-3. **Busy → interrupt (main)** — Click **Send long-task text**, wait until busy=yes, then speak a new instruction (or call `/api/utterance` again). `last_action` should be `interrupt`. Session must not become closed just from barge-in.
-
-## Sample long task
-
-The UI button sends:
-
-> Please run a long shell command that sleeps for about 60 seconds, then create a file named long_task_done.txt with the text done. Narrate briefly only.
+1. Start call — Realtime panel becomes connected (or unavailable); CAWA becomes idle.
+2. Long-task button — CAWA busy; Realtime may stay unavailable.
+3. Barge-in while busy — CAWA last_action=`interrupt`; compare abrupt vs natural audio.
 
 ## Environment
 
 | Variable / flag | Meaning |
 | :--- | :--- |
-| `TERN_URL` / `-tern-url` | CAWA base URL (required) |
+| `TERN_URL` / `-tern-url` | CAWA base URL (required), demo default `http://127.0.0.1:3100` |
 | `TERN_AGENT` / `-agent` | Agent name (default `wayfinder`) |
 | `TERN_WORK_DIR` / `-work-dir` | Work directory (default temp) |
-| `OPENAI_API_KEY` | Realtime session minting |
+| `OPENAI_API_KEY` | Realtime ephemeral minting (optional) |
 | `-listen` | Demo HTTP listen addr (default `:8787`) |

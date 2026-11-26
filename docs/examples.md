@@ -180,7 +180,7 @@ Use `Respond` to answer a `user_input_required` prompt, `Interrupt` to change th
 
 `client.ListAgents` reports `SupportsInterruptResume` for each agent, which tells you whether `Interrupt` resumes natively inside the running agent; even when it is `false`, `Interrupt` still works via Tern's fallback replan.
 
-Voice demo Example: `features/voice_demo` pairs OpenAI Realtime (browser conversation audio) with CAWA `messages` / `Interrupt` for Coding Agent execution. It is a commented Example, not the production Voice Mediator. See that directory's README for startup.
+Voice demo Example: `features/voice_demo` pairs OpenAI Realtime (browser conversation audio) with CAWA `messages` / `Interrupt` for Coding Agent execution. The UI shows separate Realtime vs Tern status panels and abrupt/natural barge-in modes. It is a commented Example, not the production Voice Mediator. See that directory's README for startup.
 
 While a tool runs with no agent stdout, Tern emits SSE `progress` events with `content: "tool_still_running"` (default every 30s) so clients can treat the stream as alive. See [docs/reference-manual-web-apis.md](reference-manual-web-apis.md).
 
