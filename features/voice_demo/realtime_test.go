@@ -99,6 +99,40 @@ func TestCreateRealtimeEphemeralSession_PostsVoiceAndSpeed(t *testing.T) {
 	}
 }
 
+func TestCreateRealtimeEphemeralSession_InstructionsReconsiderFraming(t *testing.T) {
+	var sawBody map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &sawBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": "ek_test"})
+	}))
+	defer ts.Close()
+
+	prev := openAIRealtimeClientSecretsURL
+	openAIRealtimeClientSecretsURL = ts.URL + "/v1/realtime/client_secrets"
+	defer func() { openAIRealtimeClientSecretsURL = prev }()
+
+	_, err := createRealtimeEphemeralSession(context.Background(), "sk-test", "gpt-realtime", "marin", 1.0, ResolveBargeIn("natural"), ResolveVAD(VADInput{}))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	session, _ := sawBody["session"].(map[string]any)
+	instr, _ := session["instructions"].(string)
+	lower := strings.ToLower(instr)
+	for _, want := range []string{
+		"optional evidence",
+		"reconsider",
+		"results came back",
+	} {
+		if !strings.Contains(lower, want) {
+			t.Fatalf("instructions missing %q: %q", want, instr)
+		}
+	}
+	if strings.Contains(instr, "Acknowledge task updates briefly when asked") {
+		t.Fatal("old acknowledge-agent framing must be removed")
+	}
+}
+
 func TestCreateRealtimeEphemeralSession_PostsVADParams(t *testing.T) {
 	var sawBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

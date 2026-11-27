@@ -14,6 +14,20 @@ import (
 // Older docs used POST /v1/realtime/sessions; that path now 404s for many keys.
 var openAIRealtimeClientSecretsURL = "https://api.openai.com/v1/realtime/client_secrets"
 
+// realtimeSessionInstructions tell Realtime to treat turn-complete notes as
+// optional evidence for answering the human (A), not as agent status to ack.
+const realtimeSessionInstructions = "" +
+	"You are the voice conversation layer for a Tern coding demo. Keep replies short. Do not read out long code or logs. " +
+	"Coding work is executed by a separate Coding Agent behind Tern (two layers: you converse; the agent executes). " +
+	"When you receive a turn-complete note that includes an open human question and a coding-agent result: " +
+	"treat the result as optional evidence for answering that question — not as a conversation partner. " +
+	"First reconsider (B): does the evidence suffice to answer the human? " +
+	"If yes and you should speak, answer the human (D) without acknowledging the agent. " +
+	"If not enough, continue work via the usual coding-agent path and do not narrate status. " +
+	"If you should stay silent, say nothing. " +
+	"Never say that results came back, or that you understood the agent. " +
+	"Progress notes prefixed with \"Tern coding agent status:\" are background only; do not announce them unless the human asks."
+
 // createRealtimeEphemeralSession asks OpenAI for a short-lived Realtime client secret.
 // barge controls whether assistant audio is hard-interrupted on user speech
 // (abrupt) or soft (natural: interrupt_response=false).
@@ -41,7 +55,7 @@ func createRealtimeEphemeralSession(ctx context.Context, apiKey, model, voice st
 		"session": map[string]any{
 			"type":         "realtime",
 			"model":        model,
-			"instructions": "You are the voice conversation layer for a Tern coding demo. Keep replies short. Do not read out long code or logs. Coding work is executed by a separate Coding Agent behind Tern; when you receive notes prefixed with \"Tern coding agent status:\", treat them as ground truth about the agent. Acknowledge task updates briefly when asked.",
+			"instructions": realtimeSessionInstructions,
 			"audio": map[string]any{
 				"input": map[string]any{
 					"transcription": map[string]any{
