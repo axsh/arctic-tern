@@ -146,14 +146,14 @@ Context bridge 節を更新:
 
 ## Step-by-Step Implementation Guide
 
-1. **[ ]** RED: `TestBuildTurnCompleteReconsiderNote` を追加し失敗を確認
-2. **[ ]** GREEN: `BuildTurnCompleteReconsiderNote` を実装
-3. **[ ]** RED: Realtime instructions 試験を追加し失敗を確認
-4. **[ ]** GREEN: `realtimeSessionInstructions` を更新
-5. **[ ]** RED: AppJS 契約試験を reconsider 前提に更新し失敗を確認
-6. **[ ]** GREEN: `cawa.go` の `openQuestion`、`server.go` の JSON、`app.js` / hint / README を実装
-7. **[ ]** utterance/status 試験の調整
-8. **[ ]** Verification Plan 実行、総合判定、far-knowledge、push
+1. **[x]** RED: `TestBuildTurnCompleteReconsiderNote` を追加し失敗を確認
+2. **[x]** GREEN: `BuildTurnCompleteReconsiderNote` を実装
+3. **[x]** RED: Realtime instructions 試験を追加し失敗を確認
+4. **[x]** GREEN: `realtimeSessionInstructions` を更新
+5. **[x]** RED: AppJS 契約試験を reconsider 前提に更新し失敗を確認
+6. **[x]** GREEN: `cawa.go` の `openQuestion`、`server.go` の JSON、`app.js` / hint / README を実装
+7. **[x]** utterance/status 試験の調整（Snapshot 戻り値拡張；専用 handler 試験は契約で代替）
+8. **[x]** Verification Plan 実行、総合判定、far-knowledge、push
 
 ## Verification Plan
 
@@ -198,6 +198,16 @@ Playwright E2E は追加しない。理由: マイク＋OpenAI Realtime＋Tern �
 ### 総合判定プロセス (§12)
 
 全自動試験成功後、仕様の検証シナリオ 1–10 と実装の対応を短く判定し、計画末尾に結果を追記する。
+
+### 総合判定結果
+
+| 項目 | 結果 |
+| :--- | :--- |
+| `./scripts/process/build.sh` | PASS |
+| `go test -C features/voice_demo ./...` | PASS |
+| `integration_test.sh --specify TestTurnInterrupt_` | PASS |
+| シナリオ 5–8（耳確認） | 契約試験で注入文・再検討指示を固定。聴覚的 (D) は再現手順レポートへ |
+| 判定 | **合格（自動範囲）** — 即読上げ強制を廃止し (B) 再検討フレームを導入 |
 
 ## Documentation
 
