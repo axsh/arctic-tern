@@ -139,9 +139,9 @@
 
     <p class="hint">
       Default <strong>auto</strong> route skips small talk to CAWA so Coding Agent is not interrupt-starved.
-      Use <strong>always</strong> to replay the original barge-in demo. Context bridge injects short Tern status into Realtime (no auto-speak).
+      Use <strong>always</strong> to replay the original barge-in demo. Context bridge injects short Tern status into Realtime. After a CAWA turn finishes, Voice reconsiders whether your question is answered before speaking (it may stay silent or ask Tern again). It should not say that results came back.
       Demo Tern needs <code>coding_agents.execution_mode: single_shot</code> (restart after config pull).
-      Prefer non-Temp <code>TERN_WORK_DIR</code>; CreateSession uses workspace-write — see README.
+      Prefer repo-root <code>TERN_WORK_DIR</code>; CreateSession uses danger-full-access — see README.
     </p>
   </main>
   <script src="/static/app.js"></script>

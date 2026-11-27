@@ -6,6 +6,8 @@
 //
 // Routing (auto/always/never) decides whether a transcript goes to CAWA.
 // Context bridge injects short CAWA summaries into the Realtime conversation.
+// On turn complete, inject a reconsider note (A)+(C) and run (B); do not force
+// a spoken readout of agent status. (D) answers the human only when (B) chooses.
 
 const LONG_TASK_SAMPLE =
   "Please run a long shell command that sleeps for about 60 seconds, then create a file named long_task_done.txt with the text done. Narrate briefly only.";
@@ -53,6 +55,7 @@ let fadeMs = MODE_PARAMS.natural.fade_ms;
 let callActive = false;
 let lastYouLine = "";
 let lastBridgedSummary = "";
+let lastCawaBusy = false;
 let realtimeResponseActive = false;
 let resumeLoggedForResponse = false;
 
@@ -150,32 +153,59 @@ async function postJSON(path, body) {
   return data;
 }
 
-function maybeBridgeSummary(summary, bridgeNote) {
-  if (!els.bridge.checked || !dc || dc.readyState !== "open") return;
-  const s = (summary || "").trim();
-  if (!s || s === lastBridgedSummary) return;
-  lastBridgedSummary = s;
-  const note = (bridgeNote && String(bridgeNote).trim()) ||
-    ("Tern coding agent status: " + s);
-  const ev = {
-    type: "conversation.item.create",
-    item: {
-      type: "message",
-      role: "user",
-      content: [{ type: "input_text", text: note }],
-    },
-  };
+function requestRealtimeReconsider() {
+  if (!dc || dc.readyState !== "open") return;
+  // Start a Realtime turn so (B) can choose speak / silence / more Tern work.
+  // This is not a forced readout of coding-agent status.
+  cancelActiveRealtimeResponse();
   try {
-    dc.send(JSON.stringify(ev));
-    logLine("bridge> tern status: " + s);
+    dc.send(JSON.stringify({ type: "response.create" }));
+    logLine("bridge> reconsider (turn done)");
   } catch (err) {
     logLine("bridge-error> " + err.message);
   }
 }
 
+// Inject a Tern note into Realtime. reconsider=true only when a CAWA turn has
+// just finished (busy→idle); mid-turn progress stays silent by design.
+function maybeBridgeSummary(summary, bridgeNote, opts) {
+  if (!els.bridge.checked || !dc || dc.readyState !== "open") return;
+  const s = (summary || "").trim();
+  if (!s) return;
+  const reconsider = !!(opts && opts.reconsider);
+  const isNew = s !== lastBridgedSummary;
+  if (!isNew && !reconsider) return;
+
+  if (isNew || reconsider) {
+    lastBridgedSummary = s;
+    const note = (bridgeNote && String(bridgeNote).trim()) ||
+      ("Tern coding agent status: " + s);
+    const ev = {
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: note }],
+      },
+    };
+    try {
+      dc.send(JSON.stringify(ev));
+      logLine(reconsider ? "bridge> reconsider note" : "bridge> tern status: " + s);
+    } catch (err) {
+      logLine("bridge-error> " + err.message);
+      return;
+    }
+  }
+  if (reconsider) requestRealtimeReconsider();
+}
+
 async function refreshCawaStatus() {
   const resp = await fetch("/api/status");
   const data = await resp.json();
+  const wasBusy = lastCawaBusy;
+  const nowBusy = !!data.busy;
+  lastCawaBusy = nowBusy;
+
   if (!callActive && !data.session_id) {
     setCawaStatus("no session");
   } else if (data.busy) {
@@ -188,7 +218,19 @@ async function refreshCawaStatus() {
   els.action.textContent = data.last_action || "—";
   els.interruptMode.textContent = data.interrupt_mode || "—";
   els.summary.textContent = data.last_summary || "—";
-  if (data.last_summary) maybeBridgeSummary(data.last_summary, data.bridge_note);
+  // Reconsider only on busy→idle (turn completed), not on every status poll.
+  const turnJustFinished = wasBusy && !nowBusy && !!data.session_id;
+  if (data.last_summary) {
+    if (turnJustFinished) {
+      maybeBridgeSummary(
+        data.last_summary,
+        data.reconsider_note || data.bridge_note,
+        { reconsider: true }
+      );
+    } else {
+      maybeBridgeSummary(data.last_summary, data.bridge_note, { reconsider: false });
+    }
+  }
 }
 
 async function sendUtterance(text, routeOverride) {
@@ -202,7 +244,7 @@ async function sendUtterance(text, routeOverride) {
     logLine("route> skip cawa (" + (data.reason || "skip") + ")");
   } else {
     logLine("cawa> action=" + data.action + " summary=" + (data.summary || "") + " reason=" + (data.reason || ""));
-    maybeBridgeSummary(data.summary || data.last_summary, data.bridge_note);
+    maybeBridgeSummary(data.summary || data.last_summary, data.bridge_note, { reconsider: false });
   }
   await refreshCawaStatus();
 }
@@ -387,6 +429,7 @@ els.start.addEventListener("click", async () => {
     await postJSON("/api/call/start", {});
     callActive = true;
     lastBridgedSummary = "";
+    lastCawaBusy = false;
     setCawaStatus("idle");
     logLine("cawa> session started");
     try {

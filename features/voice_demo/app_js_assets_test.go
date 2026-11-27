@@ -78,6 +78,9 @@ func TestAppJSActiveResponseCancelAndBridge(t *testing.T) {
 	if !strings.Contains(js, "conversation_already_has_active_response") {
 		t.Fatal("app.js must handle conversation_already_has_active_response")
 	}
+	if strings.Contains(js, "function requestRealtimeSpeak") {
+		t.Fatal("requestRealtimeSpeak must be renamed to requestRealtimeReconsider")
+	}
 	if !strings.Contains(js, "function maybeBridgeSummary") {
 		t.Fatal("app.js missing maybeBridgeSummary")
 	}
@@ -85,8 +88,31 @@ func TestAppJSActiveResponseCancelAndBridge(t *testing.T) {
 	if !strings.Contains(bridgeBody, "conversation.item.create") {
 		t.Fatal("maybeBridgeSummary must create conversation.item")
 	}
-	if strings.Contains(bridgeBody, "response.create") {
-		t.Fatal("maybeBridgeSummary must not auto response.create")
+	if !strings.Contains(bridgeBody, "reconsider") {
+		t.Fatal("maybeBridgeSummary must honor reconsider option")
+	}
+	if !strings.Contains(js, "function requestRealtimeReconsider") {
+		t.Fatal("app.js missing requestRealtimeReconsider for turn-done (B) reconsider")
+	}
+	reconsiderBody := functionBody(t, js, "requestRealtimeReconsider")
+	if !strings.Contains(reconsiderBody, "response.create") {
+		t.Fatal("requestRealtimeReconsider must send response.create")
+	}
+	if !strings.Contains(reconsiderBody, "reconsider") {
+		t.Fatal("requestRealtimeReconsider must log reconsider")
+	}
+	refreshBody := functionBody(t, js, "refreshCawaStatus")
+	if !strings.Contains(refreshBody, "turnJustFinished") {
+		t.Fatal("refreshCawaStatus must detect turnJustFinished")
+	}
+	if !strings.Contains(refreshBody, "reconsider: true") && !strings.Contains(refreshBody, "reconsider:true") {
+		t.Fatal("refreshCawaStatus must request reconsider only when CAWA turn finishes")
+	}
+	if !strings.Contains(refreshBody, "reconsider_note") {
+		t.Fatal("refreshCawaStatus must prefer reconsider_note on turn complete")
+	}
+	if strings.Contains(js, "Speak the final answer to the human now") {
+		t.Fatal("must not force immediate spoken readout of coding-agent result")
 	}
 	if !strings.Contains(js, "route_mode") {
 		t.Fatal("app.js must post route_mode on utterance")

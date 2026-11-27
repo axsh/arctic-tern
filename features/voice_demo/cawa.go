@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	v1 "github.com/axsh/arctic-tern/client/v1"
@@ -21,11 +22,14 @@ type cawaBridge struct {
 	workDir    string
 	sessionDir string
 
-	mu           sync.Mutex
-	busy         bool
-	lastAction   Action
-	lastSummary  string
+	mu            sync.Mutex
+	busy          bool
+	lastAction    Action
+	lastSummary   string
 	interruptMode string
+	// openQuestion is the human utterance (A) last sent to CAWA; kept for
+	// turn-complete reconsider framing until a newer sent utterance replaces it.
+	openQuestion string
 }
 
 func newCawaBridge(ternURL, agent, workDir, sessionDir string) *cawaBridge {
@@ -57,6 +61,7 @@ func (b *cawaBridge) Start(ctx context.Context) error {
 	b.lastAction = ActionNone
 	b.lastSummary = ""
 	b.interruptMode = ""
+	b.openQuestion = ""
 	log.Printf("cawa: CreateSession ok id=%s agent=%s", sess.ID, b.agent)
 	return nil
 }
@@ -66,6 +71,7 @@ func (b *cawaBridge) End(ctx context.Context) error {
 	sess := b.session
 	b.session = nil
 	b.busy = false
+	b.openQuestion = ""
 	b.mu.Unlock()
 	if sess == nil {
 		return nil
@@ -84,14 +90,14 @@ func (b *cawaBridge) Busy() bool {
 	return b.busy
 }
 
-func (b *cawaBridge) Snapshot() (busy bool, lastAction Action, lastSummary, interruptMode, sessionID string) {
+func (b *cawaBridge) Snapshot() (busy bool, lastAction Action, lastSummary, interruptMode, sessionID, openQuestion string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	id := ""
 	if b.session != nil {
 		id = b.session.ID
 	}
-	return b.busy, b.lastAction, b.lastSummary, b.interruptMode, id
+	return b.busy, b.lastAction, b.lastSummary, b.interruptMode, id, b.openQuestion
 }
 
 // HandleUtterance applies routing (auto/always/never) then calls CAWA when send=true.
@@ -133,6 +139,7 @@ func (b *cawaBridge) HandleUtterance(ctx context.Context, text, routeMode string
 	b.busy = true
 	b.lastAction = action
 	b.lastSummary = "Turn started (" + string(action) + ")"
+	b.openQuestion = strings.TrimSpace(text)
 	b.mu.Unlock()
 
 	go b.consumeStream(stream, action)

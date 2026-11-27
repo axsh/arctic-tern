@@ -58,7 +58,7 @@ Realtime uses `POST /v1/realtime/client_secrets` then browser `POST /v1/realtime
 ### work_dir and sandbox
 
 * Default `-work-dir` is a temp folder under the OS temp tree. On Windows, Codex may refuse `CODEX_HOME` under `AppData\Local\Temp`. Set `TERN_WORK_DIR` to a writable path outside Temp (example above).
-* voice_demo CreateSession uses `sandbox_mode=workspace-write` so agents can write under that work_dir.
+* voice_demo CreateSession uses `sandbox_mode=danger-full-access` so Codex can list/run without interactive approval gates (Example only).
 
 ## Where to look: OpenAI vs Tern
 
@@ -81,7 +81,10 @@ If Realtime is `unavailable` but you click **Send long-task text**, only the Ter
 
 ## Context bridge
 
-When **Context bridge** is on (default), short CAWA summaries are injected into the Realtime conversation as `conversation.item.create` notes (`Tern coding agent status: …`). No automatic `response.create` — Realtime does not speak the note by itself.
+When **Context bridge** is on (default):
+
+* **Progress** (while CAWA is busy): short notes `Tern coding agent status: …` are injected. No automatic `response.create`.
+* **Turn complete** (busy → idle): a **reconsider** note is injected. It re-states the open human question (A) and the coding-agent result (C) as optional evidence, then asks Realtime to reconsider (B): answer the human (D), request more Tern work, or stay silent. A `response.create` starts that reconsider turn; it does **not** force reading out agent status. Spoken replies must answer the human, not acknowledge Tern.
 
 ## Voice / speed
 

@@ -88,7 +88,7 @@ func (a *demoApp) handleCallStart(w http.ResponseWriter, r *http.Request) {
 	a.bridge = bridge
 	a.mu.Unlock()
 
-	_, _, _, _, sessionID := bridge.Snapshot()
+	_, _, _, _, sessionID, _ := bridge.Snapshot()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session_id": sessionID})
 }
 
@@ -203,7 +203,7 @@ func (a *demoApp) handleUtterance(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	busy, lastAction, lastSummary, interruptMode, _ := bridge.Snapshot()
+	busy, lastAction, lastSummary, interruptMode, _, openQuestion := bridge.Snapshot()
 	out := map[string]any{
 		"ok":             true,
 		"sent":           true,
@@ -214,11 +214,17 @@ func (a *demoApp) handleUtterance(w http.ResponseWriter, r *http.Request) {
 		"last_action":    string(lastAction),
 		"last_summary":   lastSummary,
 		"interrupt_mode": interruptMode,
+		"open_question":  openQuestion,
 	}
 	if note, ok := BuildContextBridgeNote(summary); ok {
 		out["bridge_note"] = note
 	} else if note, ok := BuildContextBridgeNote(lastSummary); ok {
 		out["bridge_note"] = note
+	}
+	if note, ok := BuildTurnCompleteReconsiderNote(openQuestion, lastSummary); ok {
+		out["reconsider_note"] = note
+	} else if note, ok := BuildTurnCompleteReconsiderNote(openQuestion, summary); ok {
+		out["reconsider_note"] = note
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -229,11 +235,11 @@ func (a *demoApp) handleStatus(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 	if bridge == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": true, "busy": false, "last_action": "", "last_summary": "", "interrupt_mode": "", "session_id": "",
+			"ok": true, "busy": false, "last_action": "", "last_summary": "", "interrupt_mode": "", "session_id": "", "open_question": "",
 		})
 		return
 	}
-	busy, lastAction, lastSummary, interruptMode, sessionID := bridge.Snapshot()
+	busy, lastAction, lastSummary, interruptMode, sessionID, openQuestion := bridge.Snapshot()
 	out := map[string]any{
 		"ok":             true,
 		"busy":           busy,
@@ -241,9 +247,13 @@ func (a *demoApp) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"last_summary":   lastSummary,
 		"interrupt_mode": interruptMode,
 		"session_id":     sessionID,
+		"open_question":  openQuestion,
 	}
 	if note, ok := BuildContextBridgeNote(lastSummary); ok {
 		out["bridge_note"] = note
+	}
+	if note, ok := BuildTurnCompleteReconsiderNote(openQuestion, lastSummary); ok {
+		out["reconsider_note"] = note
 	}
 	writeJSON(w, http.StatusOK, out)
 }
